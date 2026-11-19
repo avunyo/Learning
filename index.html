@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Пайтон по шагам</title>
+  <meta name="description" content="Python с нуля: смотри, как устроен код, запускай его прямо в браузере и проходи уроки по шагам.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/motion.css">
+  <script>
+    try { var t = localStorage.getItem('pps-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+    document.documentElement.classList.add('pre-reveal');
+  </script>
+</head>
+<body>
+  <div class="app">
+    <nav class="rail" data-i18n-aria="navAria">
+      <a class="brand" href="#/start" data-i18n-aria="brandAria">
+        <svg viewBox="0 0 40 40" aria-hidden="true"><rect x="1" y="1" width="38" height="38" rx="11" class="brand-bg"/><path d="M10 14l6 6-6 6" class="brand-kw"/><path d="M19 14l6 6-6 6" class="brand-str"/><path d="M28 26h4" class="brand-def"/></svg>
+      </a>
+      <button class="rail-btn" data-nav="start" type="button"><span class="ic" data-icon="home"></span><span data-i18n="navStart"></span></button>
+      <button class="rail-btn" data-nav="lessons" type="button"><span class="ic" data-icon="grid"></span><span data-i18n="navLessons"></span></button>
+      <button class="rail-btn" data-nav="sandbox" type="button"><span class="ic" data-icon="terminal"></span><span data-i18n="navSandbox"></span></button>
+      <button class="rail-btn rail-hints" data-nav="hints" type="button" aria-pressed="false"><span class="ic" data-icon="bulb"></span><span data-i18n="navHints"></span></button>
+      <div class="rail-lang">
+        <button class="rail-btn" data-nav="lang" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="langMenu"><span class="ic" data-icon="globe"></span><span id="langLabel"></span></button>
+        <div class="lang-menu" id="langMenu" role="menu" hidden></div>
+      </div>
+      <button class="rail-btn rail-theme" data-nav="theme" type="button"><span class="ic" data-icon="moon"></span><span></span></button>
+    </nav>
+
+    <header class="top">
+      <div class="top-titles">
+        <h1 data-i18n="siteName"></h1>
+        <p data-i18n="tagline"></p>
+      </div>
+      <div class="progress" id="progress"></div>
+    </header>
+
+    <main class="stage" id="stage">
+      <div class="stage-head">
+        <div class="stage-heading">
+          <p class="stage-kicker" id="stageKicker"></p>
+          <h2 class="stage-title" id="stageTitle"></h2>
+        </div>
+        <div class="mode" role="group" data-i18n-aria="modeAria">
+          <span class="mode-thumb" aria-hidden="true"></span>
+          <button type="button" data-mode="idle">IDLE</button>
+          <button type="button" data-mode="vscode">VS Code</button>
+        </div>
+      </div>
+      <div class="diagram" id="diagram">
+        <div class="callouts callouts-l" id="calloutsL"></div>
+        <div class="win-slot" id="win"></div>
+        <div class="callouts callouts-r" id="calloutsR"></div>
+        <svg class="leaders" id="leaders" aria-hidden="true"></svg>
+      </div>
+      <p class="diagram-hint" data-i18n="diagramHint"></p>
+    </main>
+
+    <aside class="panel" id="panel" data-i18n-aria="panelAria">
+      <div class="panel-body" id="panelBody"></div>
+      <section class="panel-runner" id="panelRunner"></section>
+      <div class="panel-nav" id="panelNav"></div>
+    </aside>
+
+    <footer class="dock-wrap">
+      <div class="dock" id="dock">
+        <button class="dock-launch" id="launchBtn" type="button" aria-expanded="false" aria-controls="launcher">
+          <svg class="grid4" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="2.5"/><rect x="13" y="3" width="8" height="8" rx="2.5"/><rect x="3" y="13" width="8" height="8" rx="2.5"/><rect x="13" y="13" width="8" height="8" rx="2.5"/></svg>
+          <span data-i18n="dockLessons"></span>
+        </button>
+        <div class="dock-now" id="dockNow" aria-live="polite"></div>
+        <div class="dock-nav" id="dockNav"></div>
+      </div>
+      <div class="launcher" id="launcher" role="dialog" data-i18n-aria="allLessons" hidden></div>
+    </footer>
+  </div>
+
+  <div class="tip" id="tip" role="tooltip" hidden></div>
+
+  <dialog class="sandbox" id="sandbox" data-i18n-aria="sandboxTitle">
+    <div class="sandbox-head">
+      <div>
+        <h2 data-i18n="sandboxTitle"></h2>
+        <p data-i18n="sandboxDesc"></p>
+      </div>
+      <button class="icon-btn" type="button" data-close data-i18n-aria="close"><span class="ic" data-icon="close"></span></button>
+    </div>
+    <div id="sandboxRunner"></div>
+  </dialog>
+
+  <div class="intro" id="intro" hidden></div>
+
+  <dialog class="offer" id="offer" aria-labelledby="offerTitle">
+    <div class="offer-card">
+      <div class="offer-icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><circle class="oi-ring" cx="32" cy="32" r="29"/><path class="oi-bulb" d="M24 36c-3-2.5-5-6-5-10a13 13 0 0126 0c0 4-2 7.5-5 10-1.4 1.2-2 2.6-2 4v2H26v-2c0-1.4-.6-2.8-2-4z"/><path class="oi-base" d="M27 47h10M28.5 51h7"/><path class="oi-rays" d="M32 6v4M12 14l3 3M52 14l-3 3M6 30h4M58 30h-4"/></svg>
+      </div>
+      <h2 id="offerTitle" data-i18n="offerTitle"></h2>
+      <ul class="offer-list">
+        <li><span class="ic" data-icon="word"></span><span><b data-i18n="offerF1t"></b><span data-i18n="offerF1d"></span></span></li>
+        <li><span class="ic" data-icon="steps"></span><span><b data-i18n="offerF2t"></b><span data-i18n="offerF2d"></span></span></li>
+        <li><span class="ic" data-icon="bug"></span><span><b data-i18n="offerF3t"></b><span data-i18n="offerF3d"></span></span></li>
+      </ul>
+      <div class="offer-actions">
+        <button class="btn primary big" type="button" data-offer="on" data-i18n="offerOn"></button>
+        <button class="btn big" type="button" data-offer="off" data-i18n="offerOff"></button>
+      </div>
+      <p class="offer-note" id="offerNote"></p>
+    </div>
+  </dialog>
+
+  <script src="js/i18n.js"></script>
+  <script src="js/lessons.ru.js"></script>
+  <script src="js/lessons.en.js"></script>
+  <script src="js/lessons.de.js"></script>
+  <script src="js/motion.js"></script>
+  <script src="js/intro.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
