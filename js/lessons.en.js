@@ -4,7 +4,7 @@ window.CONTENT.en = {};
 
 window.CONTENT.en.start = {
   kicker: 'Where to begin',
-  title: 'This is where code gets written',
+  title: 'This is where code lives',
   file: 'hello.py',
   code: [
     '[[comment|# my first program]]',
@@ -25,14 +25,12 @@ window.CONTENT.en.start = {
   try: '# Press "Run" and look below\nprint("Hello, world!")\nprint("2 + 2 =", 2 + 2)\n',
   intro: `
     <h3>What is Python</h3>
-    <p class="lead">A language for telling a computer what to do. People pick it as their first language because Python code reads almost like plain English.</p>
-    <p>Python is used for games and bots, data analysis, training neural networks and automating boring work.</p>
+    <p class="lead">A language for telling a computer what to do. It reads almost like English, which is why people start with it.</p>
     <h3>How to learn here</h3>
     <ol>
-      <li>Look at the diagram: the labels explain every part of the code.</li>
-      <li>Read the short explanation on the right.</li>
-      <li>Change the code in "Try it yourself" and run it.</li>
-      <li>Solve the task, and the lesson gets a check mark.</li>
+      <li>Tap the numbered circles in the code.</li>
+      <li>Change the code below and run it.</li>
+      <li>Solve the task to get a check mark.</li>
     </ol>`,
   choiceZero: { title: 'I am starting from zero', text: 'We begin by installing Python' },
   choiceKnow: { title: 'Python is already installed', text: 'Straight to the first program' },

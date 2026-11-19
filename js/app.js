@@ -19,6 +19,7 @@
     const saved = store.get('pps-lang', null);
     if (saved && window.UI[saved]) return saved;
     const nav = (navigator.languages || [navigator.language || '']).map((l) => String(l).slice(0, 2).toLowerCase());
+    try { nav.push(Intl.DateTimeFormat().resolvedOptions().locale.slice(0, 2).toLowerCase()); } catch (e) { /* no Intl */ }
     for (const l of nav) {
       if (l === 'uk' || l === 'be') return 'ru';
       if (window.UI[l]) return l;
@@ -34,6 +35,7 @@
     mode: store.get('pps-mode', null),
     done: new Set(store.get('pps-done', [])),
     hints: !!store.get('pps-hints', false),
+    panelOpen: !!store.get('pps-panel', false),
     active: null,
     revealed: false,
   };
@@ -66,6 +68,9 @@
     steps: '<path d="M5 6h6M5 12h10M5 18h7"/><path d="M17 15l3 3-3 3" transform="translate(0 -3)"/>',
     word: '<rect x="3" y="3" width="18" height="12" rx="3"/><path d="M9 15l3 4 3-4"/><path d="M7.5 9h9"/>',
     bug: '<rect x="7" y="7" width="10" height="13" rx="5"/><path d="M12 7v13M7 12H3M21 12h-4M7 17l-3 2M17 17l3 2M7 8L4 6M17 8l3-2M9 7a3 3 0 016 0"/>',
+    panel: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M14.5 4v16"/><path d="M17 8.5h1.5M17 12h1.5"/>',
+    task: '<rect x="4" y="3" width="16" height="18" rx="2.5"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
+    speaker: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/>',
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
     download: '<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/>',
     screen: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M7 9h6M7 12.5h9M9 21h6"/>',
@@ -173,7 +178,8 @@
   /* ---------------- Elements ---------------- */
   const el = {
     stage: $('#stage'), kicker: $('#stageKicker'), title: $('#stageTitle'), heading: $('.stage-heading'),
-    diagram: $('#diagram'), win: $('#win'), left: $('#calloutsL'), right: $('#calloutsR'), leaders: $('#leaders'),
+    diagram: $('#diagram'), win: $('#win'), stageChoices: $('#stageChoices'), notePop: $('#notePop'),
+    flyout: $('#flyout'), coach: $('#coach'), scrim: $('#panelScrim'), panelClose: $('#panelClose'), helperBtn: $('[data-nav="helper"]'),
     panelBody: $('#panelBody'), panelRunner: $('#panelRunner'), panelNav: $('#panelNav'), panel: $('#panel'),
     progress: $('#progress'), sandbox: $('#sandbox'),
     langBtn: $('[data-nav="lang"]'), langMenu: $('#langMenu'), langLabel: $('#langLabel'),
@@ -199,9 +205,12 @@
       <button type="button" role="menuitemradio" lang="${l.code}" data-lang="${l.code}" aria-checked="${l.code === state.lang}">
         <span class="lang-code">${l.short}</span><span>${l.name}</span>${l.code === state.lang ? icon('check') : ''}
       </button>`).join('');
+    $('.quip-q').innerHTML = '<span class="q-w">What in the</span> <span class="q-str">“hee…llo world”</span><span class="q-op">?!</span>';
     window.PPS_INPUT_DEFAULT = t('inputDefault');
+    if (typeof updateVoices === 'function') updateVoices();
     renderThemeBtn();
     renderHintsBtn();
+    applyPanelState();
   }
 
   /* ---------------- Sliding thumbs (mode switch, tabs) ---------------- */
@@ -217,23 +226,33 @@
   }
 
   /* ---------------- Stage ---------------- */
+  /*
+    The diagram shows only the editor. Every explanation sits behind a numbered pin on the code.
+    When a lesson opens, the pins pop in one after another like notifications; an unread pin
+    carries a small "!" until it has been opened. Hover, focus or tap shows the note.
+  */
+  const readNotes = new Set(store.get('pps-read', []));
+  const noteKey = (id) => `${state.view === 'lesson' ? state.lessonId : 'start'}:${effectiveMode()}:${id}`;
+  let currentAnnos = [];
+  /* where the pin goes for parts of the editor window, so it never covers anything */
+  const PIN_SLOT = { title: 'prepend', run: 'prepend', term: '.vs-term-label', shell: '.idle-title' };
+
   let stageToken = 0;
   async function renderStage(opts = {}) {
     const token = ++stageToken;
     const d = currentData();
     const mode = effectiveMode();
     const animate = opts.animate && state.revealed && !M.reduced();
+    hideNote(true);
 
     if (animate) {
       await Promise.all([
         M.anim(el.win, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-6px) scale(.99)' }], { duration: 160, easing: M.IN, fill: 'forwards' }),
-        M.anim(el.left, [{ opacity: 1 }, { opacity: 0 }], { duration: 140, fill: 'forwards' }),
-        M.anim(el.right, [{ opacity: 1 }, { opacity: 0 }], { duration: 140, fill: 'forwards' }),
-        M.anim(el.leaders, [{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' }),
         M.anim(el.heading, [{ opacity: 1 }, { opacity: 0, transform: 'translateY(-4px)' }], { duration: 140, fill: 'forwards' }),
+        M.anim(el.stageChoices, [{ opacity: 1 }, { opacity: 0 }], { duration: 140, fill: 'forwards' }),
       ]);
       if (token !== stageToken) return;
-      [el.win, el.left, el.right, el.leaders, el.heading].forEach((n) => n.getAnimations().forEach((a) => a.cancel()));
+      [el.win, el.heading, el.stageChoices].forEach((n) => n.getAnimations().forEach((a) => a.cancel()));
     }
 
     el.kicker.textContent = state.view === 'lesson' ? t('lessonOf', lessonIndex() + 1, lessons().length) : d.kicker;
@@ -242,164 +261,211 @@
     moveThumb(el.mode, el.modeThumb, '[aria-pressed="true"]', !state.revealed);
 
     el.win.innerHTML = windowHtml(d);
-    const annos = d.annos.filter((a) => !a.mode || a.mode === mode);
-    el.left.innerHTML = '';
-    el.right.innerHTML = '';
-    annos.forEach((a, i) => {
+    currentAnnos = d.annos.filter((a) => (!a.mode || a.mode === mode) && el.win.querySelector(`[data-anno="${a.id}"]`));
+    currentAnnos.forEach((a, i) => {
       const target = el.win.querySelector(`[data-anno="${a.id}"]`);
-      if (target) {
-        target.classList.add('anno-t');
-        target.dataset.kind = a.kind;
-        target.dataset.id = a.id;
-        const pin = document.createElement('span');
-        pin.className = 'pin';
-        pin.dataset.kind = a.kind;
-        pin.textContent = i + 1;
-        pin.setAttribute('aria-hidden', 'true');
-        target.append(pin);
-      }
-      const c = document.createElement('button');
-      c.type = 'button';
-      c.className = 'callout';
-      c.dataset.id = a.id;
-      c.dataset.kind = a.kind;
-      c.innerHTML = `<span class="badge">${i + 1}</span><span class="c-body"><span class="c-title">${esc(a.title)}</span>${a.text ? `<span class="c-text">${a.text}</span>` : ''}</span>`;
-      (a.side === 'r' ? el.right : el.left).append(c);
+      target.classList.add('anno-t');
+      target.dataset.kind = a.kind;
+      target.dataset.id = a.id;
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = 'pin';
+      pin.dataset.kind = a.kind;
+      pin.dataset.id = a.id;
+      pin.dataset.i = i;
+      pin.setAttribute('aria-label', t('pinAria', i + 1, a.title));
+      pin.setAttribute('aria-haspopup', 'dialog');
+      pin.setAttribute('aria-expanded', 'false');
+      if (!readNotes.has(noteKey(a.id))) pin.classList.add('is-new');
+      pin.innerHTML = `<span class="pin-ring" aria-hidden="true"></span><span class="pin-n">${i + 1}</span>`;
+      const slot = PIN_SLOT[a.id];
+      if (slot === 'prepend') target.prepend(pin);
+      else if (slot && target.querySelector(slot)) target.querySelector(slot).append(pin);
+      else target.append(pin);
     });
-    state.active = null;
-    el.diagram.classList.remove('has-active');
+
+    renderStageChoices();
 
     if (animate) {
       M.rise(el.heading, 0, 8, 420);
+      if (state.view === 'start') M.rise(el.stageChoices, 500, 12, 520);
+      else taskCardIn(500 + currentAnnos.length * 150);
       await diagramIn(0);
-    } else {
-      requestAnimationFrame(() => drawLeaders(false));
     }
   }
 
-  /* Entrance of the diagram: window, then callouts from their side, then lines drawing to the pins */
+  function renderStageChoices() {
+    el.stageChoices.classList.toggle('is-task', state.view === 'lesson');
+    if (state.view === 'lesson') {
+      /* the task of this lesson, visible right away under the editor */
+      const l = lesson();
+      const done = state.done.has(l.id);
+      el.stageChoices.hidden = false;
+      el.stageChoices.innerHTML = `
+        <div class="task-card${done ? ' is-done' : ''}">
+          <span class="tc-ic">${icon(done ? 'check' : 'task')}</span>
+          <div class="tc-body">
+            <span class="tc-label">${esc(t('tabTask'))}${done ? ` · ${esc(t('taskDone'))}` : ''}</span>
+            <p class="tc-text">${l.task.text}</p>
+          </div>
+          <button class="btn ${done ? '' : 'primary '}tc-go" type="button" data-dock="task">${esc(done ? t('taskAgain') : t('taskSolve'))}${icon('right')}</button>
+        </div>`;
+      return;
+    }
+    if (state.view !== 'start') { el.stageChoices.innerHTML = ''; el.stageChoices.hidden = true; return; }
+    const s = content().start;
+    el.stageChoices.hidden = false;
+    el.stageChoices.innerHTML = `
+      <a class="choice primary" href="#/lesson/install"><b>${esc(s.choiceZero.title)}</b><span>${esc(s.choiceZero.text)}</span></a>
+      <a class="choice" href="#/lesson/print"><b>${esc(s.choiceKnow.title)}</b><span>${esc(s.choiceKnow.text)}</span></a>`;
+  }
+
+  /* Entrance of the diagram: the window, then the pins jump in one by one and blink */
   function diagramIn(delay = 0, skipWindow = false) {
     if (!skipWindow) M.anim(el.win, [{ opacity: 0, transform: 'translateY(12px) scale(.985)' }, { opacity: 1, transform: 'none' }], { delay, duration: 620 });
-    const lefts = $$('.callout', el.left);
-    const rights = $$('.callout', el.right);
-    lefts.forEach((c, i) => M.anim(c, [{ opacity: 0, transform: 'translateX(-18px)' }, { opacity: 1, transform: 'none' }], { delay: delay + 180 + i * 70, duration: 560 }));
-    rights.forEach((c, i) => M.anim(c, [{ opacity: 0, transform: 'translateX(18px)' }, { opacity: 1, transform: 'none' }], { delay: delay + 220 + i * 70, duration: 560 }));
-    $$('.pin', el.win).forEach((p, i) => M.pop(p, delay + 520 + i * 60, 420));
-    return M.wait(delay + 280).then(() => drawLeaders(true));
-  }
-
-  function leaderGeometry() {
-    const box = el.diagram.getBoundingClientRect();
-    const winEl = el.win.querySelector('.win');
-    if (!winEl) return [];
-    const wr = winEl.getBoundingClientRect();
-    const sides = { l: 0, r: 0 };
-    const out = [];
-    $$('.callout', el.diagram).forEach((c) => {
-      const pin = el.win.querySelector(`.anno-t[data-id="${c.dataset.id}"] > .pin`);
-      if (!pin) return;
-      const left = c.parentElement === el.left;
-      const cr = c.getBoundingClientRect();
-      const pr = pin.getBoundingClientRect();
-      const x1 = (left ? cr.right : cr.left) - box.left;
-      const y1 = cr.top + 22 - box.top;
-      const x2 = pr.left + pr.width / 2 - box.left;
-      const y2 = pr.top + pr.height / 2 - box.top;
-      const k = left ? sides.l++ : sides.r++;
-      const xk = left ? wr.left - box.left - 14 - k * 7 : wr.right - box.left + 14 + k * 7;
-      out.push({ id: c.dataset.id, color: getComputedStyle(c).getPropertyValue('--k').trim(), pts: [[x1, y1], [xk, y1], [xk, y2], [x2, y2]] });
-    });
-    return out;
-  }
-
-  function partialPath(pts, f) {
-    const segs = [];
-    let total = 0;
-    for (let i = 1; i < pts.length; i++) {
-      const len = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
-      segs.push(len);
-      total += len;
-    }
-    let left = total * f;
-    let d = `M${pts[0][0]},${pts[0][1]}`;
-    for (let i = 1; i < pts.length && left > 0; i++) {
-      const len = segs[i - 1];
-      const k = Math.min(1, left / (len || 1));
-      const x = pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * k;
-      const y = pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * k;
-      d += ` L${x},${y}`;
-      left -= len;
-    }
-    return d;
-  }
-
-  let drawToken = 0;
-  function drawLeaders(animate) {
-    const svg = el.leaders;
-    const token = ++drawToken;
-    svg.innerHTML = '';
-    if (getComputedStyle(svg).display === 'none') return Promise.resolve();
-    const ns = 'http://www.w3.org/2000/svg';
-    const geo = leaderGeometry();
-    const items = geo.map((g) => {
-      const path = document.createElementNS(ns, 'path');
-      path.setAttribute('stroke', g.color);
-      path.dataset.id = g.id;
-      const dot = document.createElementNS(ns, 'circle');
-      dot.setAttribute('cx', g.pts[0][0]);
-      dot.setAttribute('cy', g.pts[0][1]);
-      dot.setAttribute('r', 3.5);
-      dot.setAttribute('fill', g.color);
-      dot.dataset.id = g.id;
-      svg.append(path, dot);
-      return { g, path, dot };
-    });
-    if (!animate || M.reduced()) {
-      items.forEach(({ g, path }) => path.setAttribute('d', partialPath(g.pts, 1)));
-      return Promise.resolve();
-    }
-    return new Promise((resolve) => {
-      const start = performance.now();
-      const dur = 620;
-      const step = 70;
-      items.forEach(({ dot }, i) => M.pop(dot, i * step, 360));
-      const ease = (x) => 1 - Math.pow(1 - x, 3);
-      function frame(now) {
-        if (token !== drawToken) return resolve();
-        let doneAll = true;
-        items.forEach(({ g, path }, i) => {
-          const f = Math.min(1, Math.max(0, (now - start - i * step) / dur));
-          if (f < 1) doneAll = false;
-          path.setAttribute('d', partialPath(g.pts, ease(f)));
-        });
-        if (!doneAll) requestAnimationFrame(frame); else resolve();
+    const pins = $$('.pin', el.win);
+    const start = delay + (skipWindow ? 100 : 420);
+    pins.forEach((p, i) => {
+      const d0 = start + i * 150;
+      M.anim(p, [
+        { opacity: 0, transform: 'translateY(6px) scale(0)' },
+        { opacity: 1, transform: 'translateY(-12px) scale(1.25)', offset: .45 },
+        { transform: 'translateY(2px) scale(.92)', offset: .72 },
+        { opacity: 1, transform: 'none' },
+      ], { delay: d0, duration: 760, easing: 'cubic-bezier(.3, .7, .4, 1)' });
+      const ring = $('.pin-ring', p);
+      if (p.classList.contains('is-new')) {
+        M.anim(ring, [{ opacity: .7, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(2.6)' }], { delay: d0 + 420, duration: 900, iterations: 2, easing: 'ease-out', fill: 'none' });
       }
-      requestAnimationFrame(frame);
     });
+    return M.wait(start + pins.length * 150 + 700);
   }
 
-  function setActive(id) {
-    if (state.active === id) return;
-    state.active = id;
-    el.diagram.classList.toggle('has-active', !!id);
-    $$('.callout, .anno-t, .leaders [data-id]', el.diagram).forEach((n) => {
-      n.classList.toggle('is-active', !!id && n.dataset.id === id);
-    });
+  function taskCardIn(delay) {
+    const card = $('.task-card', el.stageChoices);
+    if (!card) return;
+    M.anim(card, [{ opacity: 0, transform: 'translateY(18px) scale(.97)' }, { opacity: 1, transform: 'none' }], { delay, duration: 620, easing: M.SPRING });
+    M.anim($('.tc-ic', card), [{ transform: 'scale(.3) rotate(-25deg)' }, { transform: 'none' }], { delay: delay + 180, duration: 620, easing: M.SPRING });
+    if (!card.classList.contains('is-done')) {
+      M.anim($('.tc-go', card), [
+        { boxShadow: '0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent)' },
+        { boxShadow: '0 0 0 12px transparent' },
+      ], { delay: delay + 700, duration: 1100, iterations: 2, easing: 'ease-out', fill: 'none' });
+    }
   }
 
-  el.diagram.addEventListener('pointerover', (e) => {
-    const target = e.target.closest('.callout, .anno-t');
-    setActive(target ? target.dataset.id : null);
+  /* ---------------- Notes (the explanation behind each pin) ---------------- */
+  const note = { id: null, pin: null, sticky: false, hideTimer: null };
+
+  function placeNote() {
+    if (!note.pin) return;
+    const pop = el.notePop;
+    const r = note.pin.getBoundingClientRect();
+    const pr = pop.getBoundingClientRect();
+    let x = r.left + r.width / 2 - pr.width / 2;
+    x = Math.max(10, Math.min(innerWidth - pr.width - 10, x));
+    let y = r.top - pr.height - 14;
+    const below = y < 10;
+    if (below) y = r.bottom + 14;
+    pop.style.left = `${x}px`;
+    pop.style.top = `${y}px`;
+    pop.classList.toggle('below', below);
+    pop.style.setProperty('--arrow-x', `${r.left + r.width / 2 - x}px`);
+  }
+
+  function showNote(pin, sticky) {
+    clearTimeout(note.hideTimer);
+    const id = pin.dataset.id;
+    const i = Number(pin.dataset.i);
+    const a = currentAnnos[i];
+    if (!a) return;
+    const same = note.id === id;
+    note.sticky = sticky || (same && note.sticky);
+    if (same && !el.notePop.hidden) return;
+    if (note.pin) { note.pin.setAttribute('aria-expanded', 'false'); note.pin.closest('.anno-t').classList.remove('is-active'); }
+    note.id = id;
+    note.pin = pin;
+    pin.setAttribute('aria-expanded', 'true');
+    pin.closest('.anno-t').classList.add('is-active');
+    const n = currentAnnos.length;
+    el.notePop.dataset.kind = a.kind;
+    el.notePop.setAttribute('aria-label', a.title);
+    el.notePop.innerHTML = `
+      <div class="np-head"><span class="badge">${i + 1}</span><b class="np-title">${esc(a.title)}</b></div>
+      ${a.text ? `<p class="np-text">${a.text}</p>` : ''}
+      <div class="np-foot">
+        <button class="np-btn" type="button" data-note="prev" aria-label="${esc(t('notePrev'))}" ${i === 0 ? 'disabled' : ''}>${icon('left')}</button>
+        <span>${esc(t('noteOf', i + 1, n))}</span>
+        <button class="np-btn" type="button" data-note="next" aria-label="${esc(t('noteNext'))}" ${i === n - 1 ? 'disabled' : ''}>${icon('right')}</button>
+      </div>`;
+    el.notePop.hidden = false;
+    placeNote();
+    const below = el.notePop.classList.contains('below');
+    M.anim(el.notePop, [{ opacity: 0, transform: `translateY(${below ? -8 : 8}px) scale(.94)` }, { opacity: 1, transform: 'none' }], { duration: 320, easing: M.SPRING });
+    markRead(pin);
+  }
+
+  function markRead(pin) {
+    const key = noteKey(pin.dataset.id);
+    if (readNotes.has(key)) return;
+    readNotes.add(key);
+    store.set('pps-read', Array.from(readNotes));
+    pin.classList.remove('is-new');
+    M.anim(pin, [{ transform: 'scale(1.35)' }, { transform: 'none' }], { duration: 420, easing: M.SPRING });
+  }
+
+  function hideNote(now) {
+    clearTimeout(note.hideTimer);
+    const go = () => {
+      if (note.pin) { note.pin.setAttribute('aria-expanded', 'false'); const tgt = note.pin.closest('.anno-t'); if (tgt) tgt.classList.remove('is-active'); }
+      note.id = null; note.pin = null; note.sticky = false;
+      if (el.notePop.hidden) return;
+      if (now || M.reduced()) { el.notePop.hidden = true; return; }
+      M.anim(el.notePop, [{ opacity: 1 }, { opacity: 0, transform: 'scale(.97)' }], { duration: 140, fill: 'forwards' }).then(() => {
+        if (!note.id) { el.notePop.hidden = true; el.notePop.getAnimations().forEach((x) => x.cancel()); }
+      });
+    };
+    if (now) go(); else note.hideTimer = setTimeout(go, 180);
+  }
+
+  el.win.addEventListener('pointerover', (e) => {
+    const pin = e.target.closest('.pin');
+    if (pin && e.pointerType !== 'touch') showNote(pin, false);
   });
-  el.diagram.addEventListener('pointerleave', () => setActive(null));
-  el.diagram.addEventListener('focusin', (e) => { const c = e.target.closest('.callout'); if (c) setActive(c.dataset.id); });
-  el.diagram.addEventListener('focusout', () => setActive(null));
+  el.win.addEventListener('pointerout', (e) => {
+    const pin = e.target.closest('.pin');
+    if (pin && !note.sticky && !pin.contains(e.relatedTarget)) hideNote(false);
+  });
+  el.win.addEventListener('click', (e) => {
+    const pin = e.target.closest('.pin');
+    if (!pin) return;
+    if (note.id === pin.dataset.id && note.sticky) { hideNote(true); return; }
+    showNote(pin, true);
+  });
+  el.win.addEventListener('focusin', (e) => { const pin = e.target.closest('.pin'); if (pin) showNote(pin, false); });
+  el.win.addEventListener('focusout', (e) => { if (!note.sticky && !el.notePop.contains(e.relatedTarget)) hideNote(false); });
+  el.notePop.addEventListener('pointerenter', () => clearTimeout(note.hideTimer));
+  el.notePop.addEventListener('pointerleave', () => { if (!note.sticky) hideNote(false); });
+  el.notePop.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-note]');
+    if (!b || !note.pin) return;
+    const i = Number(note.pin.dataset.i) + (b.dataset.note === 'next' ? 1 : -1);
+    const pin = $(`.pin[data-i="${i}"]`, el.win);
+    if (pin) { showNote(pin, true); const again = $(`[data-note="${b.dataset.note}"]`, el.notePop); if (again && !again.disabled) again.focus(); else pin.focus({ preventScroll: true }); }
+  });
+  document.addEventListener('pointerdown', (e) => {
+    if (note.id && !e.target.closest('.pin') && !e.target.closest('.note-pop')) hideNote(true);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && note.id) { const p = note.pin; hideNote(true); if (p) p.focus({ preventScroll: true }); }
+  });
 
   new ResizeObserver(() => requestAnimationFrame(() => {
-    if (state.revealed) drawLeaders(false);
+    placeNote();
     moveThumb(el.mode, el.modeThumb, '[aria-pressed="true"]', true);
   })).observe(el.diagram);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (state.revealed) drawLeaders(false); });
+  el.stage.addEventListener('scroll', () => placeNote(), { passive: true });
+  window.addEventListener('scroll', () => placeNote(), { passive: true });
 
   $$('.mode button').forEach((b) => b.addEventListener('click', () => {
     if (b.dataset.mode === effectiveMode()) return;
@@ -837,8 +903,157 @@ def _trace_run(code):
     onResult: (code, res) => { if (state.view === 'lesson' && state.tab === 'task') checkTask(code, res); },
   });
 
+  /* ---------------- Narrator: the explanation appears word by word ---------------- */
+  let pendingNarration = null;
+  let narrationAnims = [];
+
+  /* wrap every word of the text in .nw spans; inline code, links and buttons count as one word */
+  function wrapWords(root) {
+    if (root.dataset.wrapped) return $$('.nw', root);
+    const units = [];
+    const walk = (node) => {
+      Array.from(node.childNodes).forEach((child) => {
+        if (child.nodeType === 3) {
+          const parts = child.textContent.split(/(\s+)/);
+          if (parts.every((p) => !p.trim())) return;
+          const frag = document.createDocumentFragment();
+          parts.forEach((p) => {
+            if (!p) return;
+            if (!p.trim()) { frag.append(p); return; }
+            const s = document.createElement('span');
+            s.className = 'nw';
+            s.textContent = p;
+            frag.append(s);
+            units.push(s);
+          });
+          child.replaceWith(frag);
+        } else if (child.nodeType === 1) {
+          if (/^(CODE|A|B|STRONG|BUTTON)$/.test(child.tagName)) { child.classList.add('nw'); units.push(child); }
+          else if (child.tagName !== 'BR') walk(child);
+        }
+      });
+    };
+    walk(root);
+    root.dataset.wrapped = '1';
+    return units;
+  }
+
+  function stopNarration() {
+    narrationAnims.forEach((a) => { try { a.finish(); } catch (e) { /* already gone */ } });
+    narrationAnims = [];
+    pendingNarration = null;
+  }
+
+  function narrate(root) {
+    stopNarration();
+    const blocks = $$(':scope > *', root).filter((b) => !b.classList.contains('narr-bar'));
+    let delay = 120;
+    const total = $$('.nw', root).length || 1;
+    const step = Math.max(28, Math.min(70, 5200 / total));
+    blocks.forEach((block) => {
+      const isHead = /^H\d$/.test(block.tagName);
+      const units = $$('.nw', block);
+      units.forEach((u) => {
+        const a = u.animate([
+          { opacity: 0, filter: 'blur(5px)', transform: 'translateY(5px)' },
+          { opacity: 1, filter: 'blur(0)', transform: 'none' },
+        ], { duration: 420, delay, easing: M.EASE, fill: 'backwards' });
+        narrationAnims.push(a);
+        delay += isHead ? step * 0.6 : step;
+      });
+      // block-level things without words (lists markers, notes) fade with their first word
+      delay += isHead ? 120 : 260;
+    });
+    root.classList.add('narrating');
+    const last = narrationAnims[narrationAnims.length - 1];
+    if (last) last.finished.catch(() => {}).finally(() => root.classList.remove('narrating'));
+  }
+
+  /* explanation text just rendered: narrate now if visible, else when the helper opens */
+  function queueNarration(root) {
+    wrapWords(root);
+    if (M.reduced()) return;
+    const run = () => { if (root.isConnected) narrate(root); };
+    if (state.panelOpen && state.revealed) run();
+    else pendingNarration = run;
+  }
+  /* the helper was opened: tell whatever explanation is in it again */
+  function narrateVisible(delay) {
+    pendingNarration = null;
+    const root = $('.prose[data-wrapped]', el.panelBody);
+    if (!root || M.reduced()) return;
+    setTimeout(() => { if (state.panelOpen && root.isConnected) narrate(root); }, delay);
+  }
+
+  el.panelBody.addEventListener('click', (e) => {
+    if (e.target.closest('.prose.narrating') && !e.target.closest('a, button')) stopNarration();
+  });
+
+  /* ---------------- Read aloud (speech synthesis), highlighting the spoken word ---------------- */
+  const canSpeak = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+  let speaking = null;
+  const SPEECH_LANG = { ru: 'ru-RU', en: 'en-US', de: 'de-DE' };
+
+  function stopReading() {
+    if (!speaking) return;
+    const { btn, root } = speaking;
+    speaking = null;
+    try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+    $$('.nw.speaking', root).forEach((n) => n.classList.remove('speaking'));
+    if (btn && btn.isConnected) { btn.setAttribute('aria-pressed', 'false'); $('span:last-child', btn).textContent = t('readAloud'); }
+  }
+
+  function readAloud(root, btn) {
+    if (speaking) { stopReading(); return; }
+    stopNarration();
+    const units = wrapWords(root).filter((u) => !u.closest('.narr-bar') && !u.closest('.to-task'));
+    let text = '';
+    const starts = [];
+    units.forEach((u) => { starts.push(text.length); text += u.textContent + ' '; });
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang = SPEECH_LANG[state.lang] || 'en-US';
+    const voice = window.speechSynthesis.getVoices().find((v) => v.lang && v.lang.toLowerCase().startsWith(state.lang));
+    if (voice) utt.voice = voice;
+    utt.rate = 0.98;
+    let cur = null;
+    utt.onboundary = (e) => {
+      if (!speaking || (e.name && e.name !== 'word')) return;
+      let i = starts.length - 1;
+      while (i > 0 && starts[i] > e.charIndex) i--;
+      if (cur) cur.classList.remove('speaking');
+      cur = units[i];
+      if (cur) cur.classList.add('speaking');
+    };
+    utt.onend = utt.onerror = () => { if (speaking && speaking.utt === utt) stopReading(); };
+    speaking = { utt, btn, root };
+    btn.setAttribute('aria-pressed', 'true');
+    $('span:last-child', btn).textContent = t('stopReading');
+    let started = false;
+    utt.onstart = () => { started = true; };
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utt);
+    setTimeout(() => { if (!started && speaking && speaking.utt === utt) stopReading(); }, 2500);
+  }
+
+  /* show the read-aloud button only where the system actually has a voice */
+  function updateVoices() {
+    if (!canSpeak) return;
+    const voices = window.speechSynthesis.getVoices();
+    document.body.classList.toggle('can-speak', voices.some((v) => v.lang && v.lang.toLowerCase().startsWith(state.lang)));
+  }
+  if (canSpeak) {
+    updateVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
+  }
+
+  const narrBar = () => (canSpeak ? `<div class="narr-bar"><button class="btn small read-btn" type="button" aria-pressed="false">${icon('speaker')}<span>${esc(t('readAloud'))}</span></button></div>` : '');
+  el.panelBody.addEventListener('click', (e) => {
+    const b = e.target.closest('.read-btn');
+    if (b) readAloud(b.closest('.prose'), b);
+  });
+
   function panelIn(delay = 0) {
-    const kids = $$(':scope > *, :scope > .prose > *', el.panelBody).filter((n) => !n.classList.contains('prose'));
+    const kids = $$(':scope > *, :scope > .prose:not([data-wrapped]) > *', el.panelBody).filter((n) => !n.classList.contains('prose'));
     kids.slice(0, 14).forEach((n, i) => M.rise(n, delay + i * 35, 10, 480));
   }
 
@@ -846,12 +1061,10 @@ def _trace_run(code):
     const animate = opts.animate && state.revealed;
     if (state.view === 'start') {
       const s = content().start;
+      stopReading();
       el.panelBody.innerHTML = `
-        <div class="prose">${s.intro}</div>
-        <div class="choices">
-          <a class="choice primary" href="#/lesson/install"><b>${esc(s.choiceZero.title)}</b><span>${esc(s.choiceZero.text)}</span></a>
-          <a class="choice" href="#/lesson/print"><b>${esc(s.choiceKnow.title)}</b><span>${esc(s.choiceKnow.text)}</span></a>
-        </div>`;
+        <div class="prose">${narrBar()}${s.intro}</div>`;
+      queueNarration($('.prose', el.panelBody), `start:${state.lang}`);
       panelRunner.set(s.try);
       panelRunner.setRun('run');
       el.panelNav.innerHTML = '';
@@ -885,11 +1098,15 @@ def _trace_run(code):
     const done = state.done.has(l.id);
     const body = $('.tab-body', el.panelBody);
     if (state.tab === 'learn') {
-      body.innerHTML = `<div class="prose" role="tabpanel">${l.learn.map((s) => `<h3>${esc(s.h)}</h3>${s.html}`).join('')}
+      stopReading();
+      body.innerHTML = `<div class="prose" role="tabpanel">${narrBar()}${l.learn.map((s) => `<h3>${esc(s.h)}</h3>${s.html}`).join('')}
         <p class="to-task"><button class="link-btn" type="button" data-tab="task">${esc(t('toTask'))}</button></p></div>`;
+      queueNarration($('.prose', body), `${l.id}:${state.lang}`);
       panelRunner.set(l.example || stripMarks(l.code) + '\n');
       panelRunner.setRun('run');
     } else {
+      stopReading();
+      stopNarration();
       body.innerHTML = `<div class="prose task-box" role="tabpanel">
           <p class="lead">${l.task.text}</p>
           <p class="task-how">${esc(t('taskHow'))}</p>
@@ -901,7 +1118,7 @@ def _trace_run(code):
     }
     if (animate) {
       const dir = state.tab === 'task' ? 1 : -1;
-      $$('.prose > *', body).slice(0, 12).forEach((n, i) => M.anim(n, [{ opacity: 0, transform: `translateX(${dir * 14}px)` }, { opacity: 1, transform: 'none' }], { delay: i * 30, duration: 460 }));
+      $$('.prose:not([data-wrapped]) > *', body).slice(0, 12).forEach((n, i) => M.anim(n, [{ opacity: 0, transform: `translateX(${dir * 14}px)` }, { opacity: 1, transform: 'none' }], { delay: i * 30, duration: 460 }));
       M.anim(panelRunner.root, [{ opacity: .4 }, { opacity: 1 }], { duration: 360 });
     }
   }
@@ -970,6 +1187,8 @@ def _trace_run(code):
     burst($('.v-check', v));
     renderProgress(true);
     renderDock();
+    renderStageChoices();
+    M.pop($('.tc-ic', el.stageChoices), 0, 520);
     if (!el.launcher.hidden) renderLauncher();
     const tab = $('[data-tab="task"]', el.panelBody);
     if (tab && !$('.tab-done', tab)) {
@@ -1005,6 +1224,7 @@ def _trace_run(code):
       const prev = lessons()[i - 1];
       const next = lessons()[i + 1];
       el.dockNav.innerHTML = `
+        <button class="btn dock-task" type="button" data-dock="task">${icon('task')}<span>${esc(t('dockTask'))}</span></button>
         <a class="icon-btn" ${prev ? `href="#/lesson/${prev.id}"` : 'href="#/start"'} aria-label="${esc(prev ? t('prevLesson') : t('navStart'))}">${icon('left')}</a>
         ${next ? `<a class="icon-btn" href="#/lesson/${next.id}" aria-label="${esc(t('nextLesson'))}">${icon('right')}</a>` : '<span class="icon-btn" aria-hidden="true" style="opacity:.35">' + icon('right') + '</span>'}`;
     } else {
@@ -1113,7 +1333,7 @@ def _trace_run(code):
       document.documentElement.dataset.theme = next;
       try { localStorage.setItem('pps-theme', next); } catch (e) { /* ignore */ }
       renderThemeBtn();
-    }, { x: r.left + r.width / 2, y: r.top + r.height / 2 }).then(() => drawLeaders(false));
+    }, { x: r.left + r.width / 2, y: r.top + r.height / 2 });
   }
 
   /* ---------------- Hints mode ---------------- */
@@ -1175,7 +1395,7 @@ def _trace_run(code):
       applyStaticTexts();
       sandboxRunner.labels();
       renderAll(false);
-    }).then(() => drawLeaders(false));
+    });
   }
 
   /* ---------------- Rail ---------------- */
@@ -1185,7 +1405,8 @@ def _trace_run(code):
     else if (nav === 'lessons') {
       openLauncher(true);
       if (matchMedia('(max-width: 1100px)').matches) el.dock.scrollIntoView({ behavior: M.reduced() ? 'auto' : 'smooth', block: 'center' });
-    } else if (nav === 'sandbox') openSandbox();
+    } else if (nav === 'helper') setPanel(!state.panelOpen, { focus: true });
+    else if (nav === 'sandbox') openSandbox();
     else if (nav === 'hints') setHints(!state.hints);
     else if (nav === 'lang') openLangMenu(el.langMenu.hidden);
     else if (nav === 'theme') toggleTheme(b);
@@ -1203,8 +1424,12 @@ def _trace_run(code):
     anims.push(M.anim(el.progress, [{ opacity: 0, transform: 'translateY(-10px)' }, { opacity: 1, transform: 'none' }], { delay: d0 + 300, duration: 600 }));
     anims.push(M.rise(el.heading, d0 + 260, 10));
     anims.push(M.anim(el.mode, [{ opacity: 0, transform: 'scale(.9)' }, { opacity: 1, transform: 'none' }], { delay: d0 + 340, duration: 520, easing: M.SPRING }));
-    anims.push(M.anim(el.panel, [{ opacity: 0, transform: 'translateX(40px)' }, { opacity: 1, transform: 'none' }], { delay: d0 + 200, duration: 760 }));
-    anims.push(M.rise(el.panelRunner, d0 + 520, 14));
+    if (state.panelOpen) {
+      anims.push(M.anim(el.panel, [{ opacity: 0, transform: 'translateX(40px)' }, { opacity: 1, transform: 'none' }], { delay: d0 + 200, duration: 760 }));
+      anims.push(M.rise(el.panelRunner, d0 + 520, 14));
+    }
+    if (state.view === 'start') anims.push(M.rise(el.stageChoices, d0 + 700, 14, 600));
+    else taskCardIn(d0 + 900 + currentAnnos.length * 150);
     anims.push(M.anim($('.dock-wrap'), [{ opacity: 0, transform: 'translateY(40px)' }, { opacity: 1, transform: 'none' }], { delay: d0 + 420, duration: 700, easing: M.SPRING }));
     anims.push(M.rise($('.diagram-hint'), d0 + 900, 6));
     const pb = $('.progress-bar span', el.progress);
@@ -1212,10 +1437,113 @@ def _trace_run(code):
     if (opts.skipWindow) root.classList.add('pre-diagram'); // the intro brings the window in itself
     root.classList.remove('pre-reveal');
     state.revealed = true;
-    panelIn(d0 + 360);
+    if (state.panelOpen) panelIn(d0 + 360);
+    if (state.panelOpen) narrateVisible(d0 + 500);
     if (!opts.skipWindow) anims.push(diagramIn(d0 + 240));
-    return Promise.all(anims);
+    return Promise.all(anims).then(() => maybeCoach());
   }
+
+  /* ---------------- Helper panel (hidden until asked for) ---------------- */
+  const narrow = () => matchMedia('(max-width: 1100px)').matches;
+  function applyPanelState() {
+    const open = state.panelOpen;
+    document.documentElement.classList.toggle('panel-open', open);
+    el.panel.inert = !open;
+    el.panel.setAttribute('aria-hidden', String(!open));
+    el.helperBtn.setAttribute('aria-expanded', String(open));
+    el.helperBtn.setAttribute('aria-label', open ? t('helperClose') : t('helperOpen'));
+    el.scrim.hidden = !(open && narrow());
+  }
+  function setPanel(open, opts = {}) {
+    if (open === state.panelOpen && !opts.force) return;
+    const wasOpen = state.panelOpen;
+    state.panelOpen = open;
+    store.set('pps-panel', open);
+    hideFlyout();
+    hideCoach(true);
+    applyPanelState();
+    if (open) {
+      if (opts.tab && state.view === 'lesson' && state.tab !== opts.tab) {
+        state.tab = opts.tab;
+        renderPanel({});
+      }
+      if (!wasOpen) {
+        M.anim(el.panel, [{ opacity: 0, transform: 'translateX(48px)' }, { opacity: 1, transform: 'none' }], { duration: 640 });
+        panelIn(140);
+        M.rise(el.panelRunner, 260, 14, 560);
+        narrateVisible(250);
+        if (!el.scrim.hidden) M.anim(el.scrim, [{ opacity: 0 }, { opacity: 1 }], { duration: 300 });
+      }
+      if (opts.focus) setTimeout(() => { const f = opts.tab === 'task' ? $('textarea', el.panelRunner) : el.panelClose; if (f) f.focus({ preventScroll: true }); }, 60);
+    } else {
+      stopReading();
+      if (opts.focus) el.helperBtn.focus();
+    }
+    M.pop(el.helperBtn.querySelector('.ic'), 0, 460);
+  }
+  el.panelClose.addEventListener('click', () => setPanel(false, { focus: true }));
+  el.scrim.addEventListener('click', () => setPanel(false));
+  el.panel.addEventListener('keydown', (e) => { if (e.key === 'Escape' && narrow()) setPanel(false, { focus: true }); });
+  matchMedia('(max-width: 1100px)').addEventListener('change', applyPanelState);
+  el.stageChoices.addEventListener('click', (e) => {
+    if (e.target.closest('[data-dock="task"]')) setPanel(true, { tab: 'task', focus: true, force: true });
+  });
+  el.dockNav.addEventListener('click', (e) => {
+    if (e.target.closest('[data-dock="task"]')) setPanel(true, { tab: 'task', focus: true, force: true });
+  });
+
+  /* rail flyout: says what the helper button opens before anyone clicks it */
+  let flyTimer = null;
+  function showFlyout() {
+    if (narrow() || state.panelOpen) return;
+    clearTimeout(flyTimer);
+    flyTimer = setTimeout(() => {
+      const r = el.helperBtn.getBoundingClientRect();
+      el.flyout.innerHTML = `<b>${esc(t('helperTitle'))}</b><span>${esc(t('helperDesc'))}</span>`;
+      el.flyout.hidden = false;
+      el.flyout.style.left = `${r.right + 12}px`;
+      el.flyout.style.top = `${r.top + r.height / 2 - el.flyout.offsetHeight / 2}px`;
+      M.anim(el.flyout, [{ opacity: 0, transform: 'translateX(-8px)' }, { opacity: 1, transform: 'none' }], { duration: 300 });
+    }, 220);
+  }
+  function hideFlyout() { clearTimeout(flyTimer); el.flyout.hidden = true; }
+  el.helperBtn.addEventListener('pointerenter', showFlyout);
+  el.helperBtn.addEventListener('pointerleave', hideFlyout);
+  el.helperBtn.addEventListener('focus', showFlyout);
+  el.helperBtn.addEventListener('blur', hideFlyout);
+
+  /* one-time coach mark: on the first lesson, point at the helper */
+  function maybeCoach() {
+    if (state.view !== 'lesson' || state.panelOpen || store.get('pps-coach', false) || !state.revealed || !el.coach.hidden) return;
+    if ($('#offer').open) { setTimeout(maybeCoach, 1500); return; }
+    showCoach();
+  }
+  function showCoach() {
+    const r = el.helperBtn.getBoundingClientRect();
+    el.coach.innerHTML = `${icon('panel')}<span>${esc(t('coachText'))}</span><button class="btn small" type="button">${esc(t('coachOk'))}</button>`;
+    el.coach.hidden = false;
+    const bottom = matchMedia('(max-width: 720px)').matches;
+    el.coach.classList.toggle('up', bottom);
+    if (bottom) {
+      el.coach.style.left = `${Math.max(10, Math.min(innerWidth - el.coach.offsetWidth - 10, r.left + r.width / 2 - el.coach.offsetWidth / 2))}px`;
+      el.coach.style.top = `${r.top - el.coach.offsetHeight - 14}px`;
+    } else {
+      el.coach.style.left = `${r.right + 14}px`;
+      el.coach.style.top = `${r.top + r.height / 2 - el.coach.offsetHeight / 2}px`;
+    }
+    el.coach.style.setProperty('--ax', `${r.left + r.width / 2 - el.coach.getBoundingClientRect().left}px`);
+    M.anim(el.coach, [{ opacity: 0, transform: bottom ? 'translateY(10px) scale(.9)' : 'translateX(-10px) scale(.9)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: M.SPRING });
+    el.helperBtn.classList.add('ping');
+    $('button', el.coach).addEventListener('click', () => hideCoach());
+  }
+  function hideCoach(silent) {
+    if (el.coach.hidden) return;
+    store.set('pps-coach', true);
+    el.helperBtn.classList.remove('ping');
+    if (silent || M.reduced()) { el.coach.hidden = true; return; }
+    M.anim(el.coach, [{ opacity: 1 }, { opacity: 0, transform: 'scale(.95)' }], { duration: 180, fill: 'forwards' }).then(() => { el.coach.hidden = true; el.coach.getAnimations().forEach((x) => x.cancel()); });
+  }
+
 
   /* ---------------- Routing ---------------- */
   function renderAll(animate) {
@@ -1232,6 +1560,7 @@ def _trace_run(code):
   }
 
   function route() {
+    stopReading();
     let raw = location.hash.replace(/^#\/?/, '');
     let intro = false;
     if (raw === 'intro') { history.replaceState(null, '', '#/start'); raw = 'start'; intro = true; }
@@ -1256,6 +1585,7 @@ def _trace_run(code):
     }
     renderAll(changed && state.revealed);
     if (changed) { el.stage.scrollTop = 0; el.panel.scrollTop = 0; }
+    if (changed && state.revealed) setTimeout(maybeCoach, 1600);
     return intro;
   }
 

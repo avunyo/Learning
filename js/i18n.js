@@ -419,3 +419,64 @@ Object.assign(window.UI.de, {
     import: 'Lädt ein fertiges Modul, zum Beispiel import random.',
   },
 });
+
+/* ---- Notes on the diagram, helper panel, header quip ---- */
+Object.assign(window.UI.ru, {
+  quip: 'What in the “hee…llo world”?!',
+  quipRest: 'Если твоя первая программа вызвала только это, начни здесь.',
+  diagramHint: 'Нажми на кружок с цифрой, чтобы узнать, что это.',
+  noteOf: (i, n) => `${i} из ${n}`,
+  notePrev: 'Предыдущая подсказка',
+  noteNext: 'Следующая подсказка',
+  pinAria: (n, title) => `Подсказка ${n}: ${title}`,
+  navHelper: 'Помощник',
+  helperTitle: 'Помощник к уроку',
+  helperDesc: 'Открывает панель справа: короткое объяснение, задание и окно, где код сразу запускается.',
+  helperOpen: 'Открыть помощника',
+  helperClose: 'Скрыть помощника',
+  dockTask: 'Задание',
+  coachText: 'Объяснение и задание к уроку спрятаны в помощнике.',
+  coachOk: 'Понятно',
+});
+Object.assign(window.UI.en, {
+  quip: 'What in the “hee…llo world”?!',
+  quipRest: 'If that was all your first program got out of you, start here.',
+  diagramHint: 'Tap a numbered circle to see what it is.',
+  noteOf: (i, n) => `${i} of ${n}`,
+  notePrev: 'Previous note',
+  noteNext: 'Next note',
+  pinAria: (n, title) => `Note ${n}: ${title}`,
+  navHelper: 'Helper',
+  helperTitle: 'Lesson helper',
+  helperDesc: 'Opens a panel on the right: a short explanation, the task and a box where code runs right away.',
+  helperOpen: 'Open the helper',
+  helperClose: 'Hide the helper',
+  dockTask: 'Task',
+  coachText: 'The explanation and the task for this lesson are in the helper.',
+  coachOk: 'Got it',
+});
+Object.assign(window.UI.de, {
+  quip: 'What in the “hee…llo world”?!',
+  quipRest: 'Wenn dein erstes Programm nur das in dir ausgelöst hat: fang hier an.',
+  diagramHint: 'Tipp auf einen Kreis mit Zahl, um zu sehen, was das ist.',
+  noteOf: (i, n) => `${i} von ${n}`,
+  notePrev: 'Vorheriger Hinweis',
+  noteNext: 'Nächster Hinweis',
+  pinAria: (n, title) => `Hinweis ${n}: ${title}`,
+  navHelper: 'Helfer',
+  helperTitle: 'Helfer zur Lektion',
+  helperDesc: 'Öffnet rechts eine Leiste: kurze Erklärung, Aufgabe und ein Fenster, in dem Code sofort läuft.',
+  helperOpen: 'Helfer öffnen',
+  helperClose: 'Helfer ausblenden',
+  dockTask: 'Aufgabe',
+  coachText: 'Erklärung und Aufgabe zur Lektion stecken im Helfer.',
+  coachOk: 'Verstanden',
+});
+
+Object.assign(window.UI.ru, { readAloud: 'Читать вслух', stopReading: 'Остановить' });
+Object.assign(window.UI.en, { readAloud: 'Read aloud', stopReading: 'Stop' });
+Object.assign(window.UI.de, { readAloud: 'Vorlesen', stopReading: 'Stopp' });
+
+Object.assign(window.UI.ru, { taskSolve: 'Решить задание', taskDone: 'решено', taskAgain: 'Решить ещё раз' });
+Object.assign(window.UI.en, { taskSolve: 'Solve the task', taskDone: 'solved', taskAgain: 'Solve again' });
+Object.assign(window.UI.de, { taskSolve: 'Aufgabe lösen', taskDone: 'gelöst', taskAgain: 'Nochmal lösen' });

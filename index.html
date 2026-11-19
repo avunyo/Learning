@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css">
-  <link rel="stylesheet" href="css/motion.css">
+  <link rel="stylesheet" href="css/style.css?v=5">
+  <link rel="stylesheet" href="css/motion.css?v=5">
   <script>
     try { var t = localStorage.getItem('pps-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
     document.documentElement.classList.add('pre-reveal');
@@ -23,6 +23,7 @@
       </a>
       <button class="rail-btn" data-nav="start" type="button"><span class="ic" data-icon="home"></span><span data-i18n="navStart"></span></button>
       <button class="rail-btn" data-nav="lessons" type="button"><span class="ic" data-icon="grid"></span><span data-i18n="navLessons"></span></button>
+      <button class="rail-btn rail-helper" data-nav="helper" type="button" aria-expanded="false" aria-controls="panel"><span class="ic" data-icon="panel"></span><span data-i18n="navHelper"></span></button>
       <button class="rail-btn" data-nav="sandbox" type="button"><span class="ic" data-icon="terminal"></span><span data-i18n="navSandbox"></span></button>
       <button class="rail-btn rail-hints" data-nav="hints" type="button" aria-pressed="false"><span class="ic" data-icon="bulb"></span><span data-i18n="navHints"></span></button>
       <div class="rail-lang">
@@ -35,7 +36,7 @@
     <header class="top">
       <div class="top-titles">
         <h1 data-i18n="siteName"></h1>
-        <p data-i18n="tagline"></p>
+        <p class="quip"><span class="quip-q"></span> <span class="quip-rest" data-i18n="quipRest"></span></p>
       </div>
       <div class="progress" id="progress"></div>
     </header>
@@ -53,15 +54,17 @@
         </div>
       </div>
       <div class="diagram" id="diagram">
-        <div class="callouts callouts-l" id="calloutsL"></div>
         <div class="win-slot" id="win"></div>
-        <div class="callouts callouts-r" id="calloutsR"></div>
-        <svg class="leaders" id="leaders" aria-hidden="true"></svg>
       </div>
+      <div class="stage-choices" id="stageChoices"></div>
       <p class="diagram-hint" data-i18n="diagramHint"></p>
     </main>
 
     <aside class="panel" id="panel" data-i18n-aria="panelAria">
+      <div class="panel-top">
+        <span class="panel-top-t" data-i18n="helperTitle"></span>
+        <button class="icon-btn" type="button" id="panelClose" data-i18n-aria="helperClose"><span class="ic" data-icon="close"></span></button>
+      </div>
       <div class="panel-body" id="panelBody"></div>
       <section class="panel-runner" id="panelRunner"></section>
       <div class="panel-nav" id="panelNav"></div>
@@ -81,6 +84,10 @@
   </div>
 
   <div class="tip" id="tip" role="tooltip" hidden></div>
+  <div class="note-pop" id="notePop" role="dialog" hidden></div>
+  <div class="flyout" id="flyout" role="tooltip" hidden></div>
+  <div class="coach" id="coach" role="status" hidden></div>
+  <div class="panel-scrim" id="panelScrim" hidden></div>
 
   <dialog class="sandbox" id="sandbox" data-i18n-aria="sandboxTitle">
     <div class="sandbox-head">
@@ -115,11 +122,11 @@
   </dialog>
 
   <script src="js/i18n.js"></script>
-  <script src="js/lessons.ru.js"></script>
-  <script src="js/lessons.en.js"></script>
-  <script src="js/lessons.de.js"></script>
-  <script src="js/motion.js"></script>
-  <script src="js/intro.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/lessons.ru.js?v=5"></script>
+  <script src="js/lessons.en.js?v=5"></script>
+  <script src="js/lessons.de.js?v=5"></script>
+  <script src="js/motion.js?v=5"></script>
+  <script src="js/intro.js?v=5"></script>
+  <script src="js/app.js?v=5"></script>
 </body>
 </html>

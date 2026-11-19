@@ -4,7 +4,7 @@ window.CONTENT.de = {};
 
 window.CONTENT.de.start = {
   kicker: 'Wo du anfängst',
-  title: 'So sieht der Ort aus, an dem Code entsteht',
+  title: 'Hier entsteht Code',
   file: 'hallo.py',
   code: [
     '[[comment|# mein erstes Programm]]',
@@ -25,14 +25,12 @@ window.CONTENT.de.start = {
   try: '# Drück auf „Ausführen“ und schau nach unten\nprint("Hallo, Welt!")\nprint("2 + 2 =", 2 + 2)\n',
   intro: `
     <h3>Was ist Python</h3>
-    <p class="lead">Eine Sprache, mit der man dem Computer erklärt, was er tun soll. Viele lernen sie als erste, weil sich Python-Code fast wie normales Englisch liest.</p>
-    <p>Mit Python schreibt man Spiele und Bots, wertet Daten aus, trainiert neuronale Netze und automatisiert langweilige Arbeit.</p>
+    <p class="lead">Eine Sprache, mit der man dem Computer sagt, was er tun soll. Sie liest sich fast wie Englisch, darum fängt man damit an.</p>
     <h3>So lernst du hier</h3>
     <ol>
-      <li>Schau dir das Schema an: die Beschriftungen erklären jeden Teil des Codes.</li>
-      <li>Lies die kurze Erklärung rechts.</li>
-      <li>Ändere den Code in „Probier es selbst“ und führ ihn aus.</li>
-      <li>Löse die Aufgabe, dann bekommt die Lektion einen Haken.</li>
+      <li>Tipp auf die Kreise mit Zahlen im Code.</li>
+      <li>Ändere den Code unten und führ ihn aus.</li>
+      <li>Löse die Aufgabe, dann gibt es einen Haken.</li>
     </ol>`,
   choiceZero: { title: 'Ich fange bei null an', text: 'Wir beginnen mit der Installation' },
   choiceKnow: { title: 'Python ist schon installiert', text: 'Direkt zum ersten Programm' },
