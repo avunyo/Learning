@@ -60,7 +60,7 @@ window.PPSIntro = (() => {
     skipBtn.addEventListener('click', () => skip());
     const onKey = (e) => { if (e.key === 'Escape') skip(); };
     window.addEventListener('keydown', onKey);
-    M.anim(skipBtn, [{ opacity: 0 }, { opacity: 1 }], { delay: 600, duration: 500 });
+    M.anim(skipBtn, [{ opacity: 0 }, { opacity: 1 }], { delay: 600, duration: 500, fill: 'both' });
 
     let revealStarted = false;
     function startReveal(skipWindow) {

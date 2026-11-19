@@ -134,9 +134,35 @@
   /* ---------------- Editor illustrations ---------------- */
   const PY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-4 0-4 1.6-4 3v2h4v1H6c-2 0-3 1.5-3 4s1 4 3 4h2v-2.5c0-1.4 1-2.5 2.5-2.5h4c1.4 0 2.5-1 2.5-2.5V6c0-1.6-1.5-3-5-3z" fill="#84A4FF"/><path d="M12 21c4 0 4-1.6 4-3v-2h-4v-1h6c2 0 3-1.5 3-4s-1-4-3-4h-2v2.5c0 1.4-1 2.5-2.5 2.5h-4C8 12 7 13 7 14.5V18c0 1.6 1.5 3 5 3z" fill="#FFD866"/></svg>';
 
+  /* hints mode: a short line under each line of code says what it does */
+  function ghostFor(raw) {
+    const line = stripMarks(raw).trim();
+    if (!line) return '';
+    if (line.startsWith('#')) return t('ghostComment');
+    const g = glossary();
+    const words = line.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ' ').match(/[A-Za-z_]+/g) || [];
+    const pri = ['def', 'for', 'while', 'if', 'elif', 'else', 'return', 'import'];
+    const known = words.filter((w) => Object.prototype.hasOwnProperty.call(g, w));
+    const word = known.find((w) => pri.includes(w)) || known[0];
+    const assign = line.match(/^([A-Za-z_]\w*)\s*=(?!=)\s*(.+)$/);
+    if (assign) {
+      const extra = word ? ` ${word}: ${g[word]}` : '';
+      return t('ghostAssign', assign[1]) + extra;
+    }
+    return word ? `${word}: ${g[word]}` : '';
+  }
+  function codeRows(d) {
+    const html = (d.rawHtml || renderMarked(d.code)).split('\n');
+    const raw = d.code.split('\n');
+    return html.map((h, i) => {
+      const ghost = state.hints && !d.rawHtml ? ghostFor(raw[i] || '') : '';
+      return { html: h || ' ', ghost: ghost ? `<span class="ghost">↳ ${esc(ghost)}</span>` : '' };
+    });
+  }
+
   function vscodeWin(d) {
-    const n = d.code.split('\n').length;
-    const nums = Array.from({ length: n }, (_, i) => i + 1).join('\n');
+    const rows = codeRows(d);
+    const n = rows.length;
     return `
       <div class="win vscode">
         <div class="vs-top"><span class="vs-dots"><i></i><i></i><i></i></span><span class="vs-title">${esc(d.file)} — learning</span></div>
@@ -144,9 +170,9 @@
           <span class="vs-tab" data-anno="tab">${PY_ICON}${esc(d.file)}</span>
           <span class="vs-run" data-anno="run" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg></span>
         </div>
-        <div class="vs-code">
-          <pre class="vs-gutter" data-anno="gutter">${nums}</pre>
-          <pre class="code">${d.rawHtml || renderMarked(d.code)}</pre>
+        <div class="vs-code code">
+          <span class="vs-gutter" data-anno="gutter" style="grid-row: 1 / span ${n}"></span>
+          ${rows.map((r, i) => `<span class="ln-n" style="grid-row: ${i + 1}">${i + 1}</span><span class="ln-c" style="grid-row: ${i + 1}">${r.html}${r.ghost}</span>`).join('')}
         </div>
         <div class="vs-term" data-anno="term">
           <span class="vs-term-label">${esc(t('terminal'))}</span>
@@ -163,7 +189,7 @@
         <div class="idle-w idle-file">
           <div class="idle-title" data-anno="title">${esc(d.file)} — C:\\learning\\${esc(d.file)} (3.13)</div>
           <div class="idle-menu"><span>File</span><span>Edit</span><span>Format</span><span data-anno="menu-run">Run</span><span>Options</span><span>Window</span><span>Help</span></div>
-          <pre class="code">${d.rawHtml || renderMarked(d.code)}</pre>
+          <div class="code">${codeRows(d).map((r) => `<div class="ln-c">${r.html}${r.ghost}</div>`).join('')}</div>
           <div class="idle-status">Ln: ${lines.length} Col: ${stripMarks(lines[lines.length - 1]).length}</div>
         </div>
         <div class="idle-w idle-shell" data-anno="shell">
@@ -189,7 +215,7 @@
   };
 
   const currentData = () => (state.view === 'lesson' ? lesson() : content().start);
-  const effectiveMode = () => state.mode || (state.view === 'lesson' && lesson().mode) || 'vscode';
+  const effectiveMode = () => state.mode || 'vscode';
   const windowHtml = (d) => (effectiveMode() === 'idle' ? idleWin(d) : vscodeWin(d));
 
   /* ---------------- Static texts ---------------- */
@@ -317,7 +343,8 @@
     el.stageChoices.hidden = false;
     el.stageChoices.innerHTML = `
       <a class="choice primary" href="#/lesson/install"><b>${esc(s.choiceZero.title)}</b><span>${esc(s.choiceZero.text)}</span></a>
-      <a class="choice" href="#/lesson/print"><b>${esc(s.choiceKnow.title)}</b><span>${esc(s.choiceKnow.text)}</span></a>`;
+      <a class="choice" href="#/lesson/print"><b>${esc(s.choiceKnow.title)}</b><span>${esc(s.choiceKnow.text)}</span></a>
+      <button class="link-btn tour-again" type="button">${esc(t('tourAgain'))}</button>`;
   }
 
   /* Entrance of the diagram: the window, then the pins jump in one by one and blink */
@@ -1342,7 +1369,22 @@ def _trace_run(code):
     el.hintsBtn.title = state.hints ? t('hintsOn') : t('hintsOff');
     document.body.classList.toggle('hints-on', state.hints);
   }
-  function setHints(on) {
+  let toastTimer = null;
+  function toast(text) {
+    let n = $('.toast');
+    if (!n) { n = document.createElement('div'); n.className = 'toast'; n.setAttribute('role', 'status'); document.body.append(n); }
+    n.innerHTML = `${icon('bulb')}<span>${esc(text)}</span>`;
+    n.hidden = false;
+    M.anim(n, [{ opacity: 0, transform: 'translate(-50%, 16px) scale(.96)' }, { opacity: 1, transform: 'translate(-50%, 0)' }], { duration: 420, easing: M.SPRING });
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      M.anim(n, [{ opacity: 1 }, { opacity: 0 }], { duration: 260, fill: 'forwards' }).then(() => { n.hidden = true; n.getAnimations().forEach((a) => a.cancel()); });
+    }, on2ms(text));
+  }
+  const on2ms = (text) => Math.max(2600, text.length * 55);
+
+  function setHints(on, opts = {}) {
+    const changed = state.hints !== on;
     state.hints = on;
     store.set('pps-hints', on);
     renderHintsBtn();
@@ -1352,6 +1394,11 @@ def _trace_run(code):
     const det = $('.task-box details', el.panelBody);
     if (det && on) det.open = true;
     M.pop(el.hintsBtn.querySelector('.ic'), 0, 520);
+    if (changed && state.revealed) {
+      renderStage({});
+      $$('.ghost', el.win).forEach((g, i) => M.anim(g, [{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], { delay: 80 + i * 90, duration: 420 }));
+    }
+    if (opts.toast) toast(on ? t('hintsToastOn') : t('hintsToastOff'));
     if (on) {
       $$('.hint-only').forEach((n) => { if (n.offsetParent) M.anim(n, [{ opacity: 0, transform: 'scale(.8)' }, { opacity: 1, transform: 'none' }], { duration: 480, easing: M.SPRING }); });
       M.anim(el.hintsBtn, [{ boxShadow: '0 0 0 0 color-mix(in srgb, var(--kw) 55%, transparent)' }, { boxShadow: '0 0 0 14px transparent' }], { duration: 800, easing: 'ease-out' });
@@ -1407,7 +1454,7 @@ def _trace_run(code):
       if (matchMedia('(max-width: 1100px)').matches) el.dock.scrollIntoView({ behavior: M.reduced() ? 'auto' : 'smooth', block: 'center' });
     } else if (nav === 'helper') setPanel(!state.panelOpen, { focus: true });
     else if (nav === 'sandbox') openSandbox();
-    else if (nav === 'hints') setHints(!state.hints);
+    else if (nav === 'hints') setHints(!state.hints, { toast: true });
     else if (nav === 'lang') openLangMenu(el.langMenu.hidden);
     else if (nav === 'theme') toggleTheme(b);
   }));
@@ -1486,6 +1533,7 @@ def _trace_run(code):
   el.panel.addEventListener('keydown', (e) => { if (e.key === 'Escape' && narrow()) setPanel(false, { focus: true }); });
   matchMedia('(max-width: 1100px)').addEventListener('change', applyPanelState);
   el.stageChoices.addEventListener('click', (e) => {
+    if (e.target.closest('.tour-again')) { runTour(); return; }
     if (e.target.closest('[data-dock="task"]')) setPanel(true, { tab: 'task', focus: true, force: true });
   });
   el.dockNav.addEventListener('click', (e) => {
@@ -1514,7 +1562,7 @@ def _trace_run(code):
 
   /* one-time coach mark: on the first lesson, point at the helper */
   function maybeCoach() {
-    if (state.view !== 'lesson' || state.panelOpen || store.get('pps-coach', false) || !state.revealed || !el.coach.hidden) return;
+    if (touring || !store.get('pps-tour', false) || state.view !== 'lesson' || state.panelOpen || store.get('pps-coach', false) || !state.revealed || !el.coach.hidden) return;
     if ($('#offer').open) { setTimeout(maybeCoach, 1500); return; }
     showCoach();
   }
@@ -1564,6 +1612,11 @@ def _trace_run(code):
     let raw = location.hash.replace(/^#\/?/, '');
     let intro = false;
     if (raw === 'intro') { history.replaceState(null, '', '#/start'); raw = 'start'; intro = true; }
+    if (raw === 'tour') {
+      history.replaceState(null, '', '#/start');
+      raw = 'start';
+      if (state.revealed) setTimeout(() => runTour(), state.view === 'start' ? 50 : 900);
+    }
     const parts = raw.split('/');
     const prev = state.lessonId;
     if (parts[0] === 'lesson' && lessons().some((l) => l.id === parts[1])) {
@@ -1589,6 +1642,46 @@ def _trace_run(code):
     return intro;
   }
 
+  /* ---------------- Guided tour ---------------- */
+  function tourSteps() {
+    const T = t('tourSteps');
+    const step = (key, target) => ({ title: T[key][0], text: T[key][1], target });
+    return [
+      step('win', () => el.win.querySelector('.win')),
+      step('pin', () => el.win.querySelector('.pin')),
+      step('mode', () => el.mode),
+      step(state.view === 'start' ? 'start' : 'task', () => (el.stageChoices.hidden ? null : el.stageChoices)),
+      step('lessons', () => el.dock),
+      step('helper', () => el.helperBtn),
+      step('sandbox', () => $('[data-nav="sandbox"]')),
+      step('hints', () => el.hintsBtn),
+      step('progress', () => el.progress),
+      step('prefs', () => [$('.rail-lang'), $('[data-nav="theme"]')]),
+    ];
+  }
+  let touring = false;
+  function runTour() {
+    if (touring) return Promise.resolve();
+    touring = true;
+    hideNote(true);
+    hideCoach(true);
+    openLauncher(false);
+    if (narrow() && state.panelOpen) setPanel(false);
+    return window.PPSTour.run({
+      steps: tourSteps(),
+      labels: { next: t('tourNext'), back: t('tourBack'), skip: t('tourSkip'), done: t('tourDone'), of: (i, n) => t('tourOf', i, n), aria: t('tourAria') },
+    }).then(() => {
+      touring = false;
+      store.set('pps-tour', true);
+      store.set('pps-coach', true);
+    });
+  }
+  /* first visit: tour, then the hints offer */
+  function afterReveal() {
+    const next = store.get('pps-tour', false) ? Promise.resolve() : runTour();
+    return next.then(() => { if (!store.get('pps-hints-asked', false)) return window.PPSIntro.offer(introApi()); });
+  }
+
   /* ---------------- Intro + hints offer ---------------- */
   function introApi() {
     return {
@@ -1607,7 +1700,7 @@ def _trace_run(code):
       hideWindow(h) { el.win.style.visibility = h ? 'hidden' : ''; },
       hintsButton: () => el.hintsBtn,
       hintsAlreadyAsked: () => !!store.get('pps-hints-asked', false),
-      setHints(on) { store.set('pps-hints-asked', true); setHints(on); },
+      setHints(on) { store.set('pps-hints-asked', true); setHints(on, { toast: on }); },
       bottomBar: () => matchMedia('(max-width: 720px)').matches,
     };
   }
@@ -1615,7 +1708,7 @@ def _trace_run(code):
   function playIntro(force) {
     window.PPSIntro.play(introApi(), { force }).then(() => {
       store.set('pps-intro', true);
-      return window.PPSIntro.offer(introApi());
+      return afterReveal();
     });
   }
 
@@ -1630,8 +1723,6 @@ def _trace_run(code):
   if (forced || (!store.get('pps-intro', false) && !M.reduced())) {
     playIntro(forced);
   } else {
-    revealApp().then(() => {
-      if (!store.get('pps-hints-asked', false)) window.PPSIntro.offer(introApi());
-    });
+    revealApp().then(afterReveal);
   }
 })();

@@ -480,3 +480,81 @@ Object.assign(window.UI.de, { readAloud: 'Vorlesen', stopReading: 'Stopp' });
 Object.assign(window.UI.ru, { taskSolve: 'Решить задание', taskDone: 'решено', taskAgain: 'Решить ещё раз' });
 Object.assign(window.UI.en, { taskSolve: 'Solve the task', taskDone: 'solved', taskAgain: 'Solve again' });
 Object.assign(window.UI.de, { taskSolve: 'Aufgabe lösen', taskDone: 'gelöst', taskAgain: 'Nochmal lösen' });
+
+/* ---- Guided tour ---- */
+Object.assign(window.UI.ru, {
+  tourNext: 'Дальше', tourBack: 'Назад', tourSkip: 'Пропустить', tourDone: 'Поехали!',
+  tourOf: (i, n) => `${i} из ${n}`,
+  tourAgain: 'Посмотреть экскурсию ещё раз',
+  tourAria: 'Экскурсия по сайту',
+  tourSteps: {
+    win: ['Это редактор', 'Здесь код урока, ровно так, как он выглядел бы у тебя на компьютере.'],
+    pin: ['Кружки с цифрами', 'Нажми на кружок, и он объяснит этот кусочек кода. Залитые кружки ещё не открыты.'],
+    mode: ['IDLE или VS Code', 'Один и тот же код в двух редакторах. Выбери тот, что стоит у тебя дома.'],
+    start: ['Отсюда начинаешь', 'Совсем с нуля? Начни с установки. Python уже стоит? Сразу к первой программе.'],
+    task: ['Задание', 'Каждый урок заканчивается маленьким заданием. Решишь, и появится галочка.'],
+    lessons: ['Все уроки', 'Четыре квадратика открывают все уроки. Рядом видно, где ты сейчас, и стрелки дальше.'],
+    helper: ['Помощник', 'Открывает справа объяснение, задание и окно, где работает настоящий Python.'],
+    sandbox: ['Песочница', 'Пустое окно для своих идей. Код сохраняется.'],
+    hints: ['Подсказки', 'Слова объясняют себя, программа идёт по шагам, ошибки подсвечиваются.'],
+    progress: ['Твой прогресс', 'Здесь копятся галочки. Восемь уроков, и основы у тебя в кармане.'],
+    prefs: ['Язык и тема', 'Русский, английский или немецкий, светлая или тёмная тема. Вот и всё, удачи!'],
+  },
+});
+Object.assign(window.UI.en, {
+  tourNext: 'Next', tourBack: 'Back', tourSkip: 'Skip', tourDone: "Let's go!",
+  tourOf: (i, n) => `${i} of ${n}`,
+  tourAgain: 'Take the tour again',
+  tourAria: 'Site tour',
+  tourSteps: {
+    win: ['This is the editor', 'This is the lesson\'s code, exactly as it would look on your own computer.'],
+    pin: ['Numbered circles', 'Tap a circle and it explains that bit of code. Filled circles are the ones not opened yet.'],
+    mode: ['IDLE or VS Code', 'The same code in two editors. Pick the one you have at home.'],
+    start: ['Start here', 'Brand new? Begin with the installation. Python already installed? Go straight to the first program.'],
+    task: ['The task', 'Every lesson ends with a small task. Solve it and you get a check mark.'],
+    lessons: ['All lessons', 'The four squares open every lesson. Next to them: where you are now and arrows to move on.'],
+    helper: ['Helper', 'Opens the explanation, the task and a box running real Python on the right.'],
+    sandbox: ['Sandbox', 'An empty box for your own ideas. Your code is saved.'],
+    hints: ['Hints', 'Words explain themselves, programs run step by step, errors light up.'],
+    progress: ['Your progress', 'Your check marks add up here. Eight lessons and you know the basics.'],
+    prefs: ['Language and theme', "Russian, English or German, light or dark. That's it, have fun!"],
+  },
+});
+Object.assign(window.UI.de, {
+  tourNext: 'Weiter', tourBack: 'Zurück', tourSkip: 'Überspringen', tourDone: "Los geht's!",
+  tourOf: (i, n) => `${i} von ${n}`,
+  tourAgain: 'Rundgang nochmal ansehen',
+  tourAria: 'Rundgang durch die Seite',
+  tourSteps: {
+    win: ['Das ist der Editor', 'Hier steht der Code der Lektion, genau so, wie er bei dir am Computer aussehen würde.'],
+    pin: ['Kreise mit Zahlen', 'Tipp auf einen Kreis, dann erklärt er dieses Stück Code. Gefüllte Kreise sind noch ungeöffnet.'],
+    mode: ['IDLE oder VS Code', 'Derselbe Code in zwei Editoren. Nimm den, den du zu Hause hast.'],
+    start: ['Hier fängst du an', 'Ganz neu? Dann mit der Installation. Python ist schon da? Direkt zum ersten Programm.'],
+    task: ['Die Aufgabe', 'Jede Lektion endet mit einer kleinen Aufgabe. Gelöst gibt es einen Haken.'],
+    lessons: ['Alle Lektionen', 'Die vier Quadrate öffnen alle Lektionen. Daneben siehst du, wo du gerade bist, und blätterst weiter.'],
+    helper: ['Helfer', 'Öffnet rechts die Erklärung, die Aufgabe und ein Fenster, in dem echtes Python läuft.'],
+    sandbox: ['Sandbox', 'Ein leeres Fenster für deine eigenen Ideen. Der Code bleibt gespeichert.'],
+    hints: ['Tipps', 'Wörter erklären sich, Programme laufen Schritt für Schritt, Fehler leuchten auf.'],
+    progress: ['Dein Fortschritt', 'Hier sammelst du Haken. Acht Lektionen, dann sitzen die Grundlagen.'],
+    prefs: ['Sprache und Design', "Russisch, Englisch oder Deutsch, hell oder dunkel. Das war's, viel Spaß!"],
+  },
+});
+
+Object.assign(window.UI.ru, {
+  ghostComment: 'Комментарий: Python его пропускает.',
+  ghostAssign: (n) => `Кладёт значение в ${n}.`,
+  hintsToastOn: 'Подсказки включены: под каждой строкой кода написано, что она делает. В помощнике появилась кнопка «По шагам».',
+  hintsToastOff: 'Подсказки выключены.',
+});
+Object.assign(window.UI.en, {
+  ghostComment: 'Comment: Python skips it.',
+  ghostAssign: (n) => `Stores a value in ${n}.`,
+  hintsToastOn: 'Hints on: every line of code now says what it does. The helper has a new "Step by step" button.',
+  hintsToastOff: 'Hints off.',
+});
+Object.assign(window.UI.de, {
+  ghostComment: 'Kommentar: Python überspringt ihn.',
+  ghostAssign: (n) => `Legt einen Wert in ${n}.`,
+  hintsToastOn: 'Tipps an: Unter jeder Codezeile steht jetzt, was sie macht. Im Helfer gibt es den Knopf „Schrittweise“.',
+  hintsToastOff: 'Tipps aus.',
+});
