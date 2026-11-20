@@ -65,5 +65,43 @@ window.Motion = (() => {
     ], { duration: opts.duration || 900, easing: opts.easing || SWING, fill: 'forwards' });
   }
 
-  return { EASE, SPRING, IN, SWING, reduced, anim, wait, rise, pop, staggerList, viewTransition, flyTo };
+
+  /* A splash at a point: rings spreading like on water, plus drops that fly off and fall */
+  function splash(x, y, color = 'var(--kw)', opts = {}) {
+    if (reduced()) return;
+    const size = opts.size || 54;
+    const rings = opts.rings == null ? 3 : opts.rings;
+    const drops = opts.drops == null ? 12 : opts.drops;
+    const made = [];
+    for (let i = 0; i < rings; i++) {
+      const r = document.createElement('span');
+      r.className = 'splash-ring';
+      Object.assign(r.style, { left: `${x - size / 2}px`, top: `${y - size / 2}px`, width: `${size}px`, height: `${size}px`, borderColor: color });
+      document.body.append(r);
+      made.push(r);
+      r.animate([
+        { transform: 'scale(.3)', opacity: .85, borderWidth: '3px' },
+        { transform: `scale(${2.2 + i * .7})`, opacity: 0, borderWidth: '1px' },
+      ], { delay: i * 130, duration: 900, easing: EASE, fill: 'backwards' }).finished.then(() => r.remove(), () => r.remove());
+    }
+    for (let i = 0; i < drops; i++) {
+      const d = document.createElement('span');
+      d.className = 'splash-drop';
+      const s = 4 + Math.random() * 5;
+      Object.assign(d.style, { left: `${x - s / 2}px`, top: `${y - s / 2}px`, width: `${s}px`, height: `${s}px`, background: color });
+      document.body.append(d);
+      const a = -Math.PI / 2 + (Math.random() - .5) * Math.PI * 1.4;
+      const dist = 30 + Math.random() * 46;
+      const dx = Math.cos(a) * dist;
+      const dy = Math.sin(a) * dist;
+      d.animate([
+        { transform: 'translate(0, 0) scale(1)', opacity: 1 },
+        { transform: `translate(${dx * .7}px, ${dy * .9}px) scale(1)`, opacity: 1, offset: .45 },
+        { transform: `translate(${dx}px, ${dy * .6 + 34}px) scale(.4)`, opacity: 0 },
+      ], { duration: 700 + Math.random() * 300, easing: 'cubic-bezier(.2, .6, .4, 1)' }).finished.then(() => d.remove(), () => d.remove());
+    }
+    return made;
+  }
+
+  return { EASE, SPRING, IN, SWING, reduced, anim, wait, rise, pop, staggerList, viewTransition, flyTo, splash };
 })();

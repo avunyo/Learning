@@ -167,23 +167,88 @@ window.PPSIntro = (() => {
     }
   }
 
-  /* Full-screen offer; closing it shrinks the card into the Hints button */
+  /*
+    The bulb jumps out of the Tipps button, a "?" pops up over it, and it lands as the icon
+    of the offer. The answer flies back into the button and lands with a splash.
+  */
+  async function bulbJump(api, dlg) {
+    const M = window.Motion;
+    const btn = api.hintsButton();
+    const ic = btn.querySelector('.ic');
+    const r = ic.getBoundingClientRect();
+    const S = 84;
+    const fly = document.createElement('div');
+    fly.className = 'bulb-fly';
+    fly.setAttribute('aria-hidden', 'true');
+    fly.innerHTML = `<div class="bulb-in">${$('.offer-icon', dlg).innerHTML}<span class="bulb-q">?</span></div>`;
+    document.body.append(fly);
+    const inner = $('.bulb-in', fly);
+    const q = $('.bulb-q', fly);
+    const s0 = r.width / S;
+    const x0 = r.left + r.width / 2 - S / 2;
+    const y0 = r.top + r.height / 2 - S / 2;
+    const xc = innerWidth / 2 - S / 2;
+    const yc = innerHeight * 0.4 - S / 2;
+    const xm = x0 + (xc - x0) * 0.42;
+    const ym = Math.min(y0, yc) - Math.min(160, innerHeight * 0.18);
+
+    // the button winds up, then the bulb leaves it
+    M.anim(btn, [{ transform: 'none' }, { transform: 'scale(.86)', offset: .3 }, { transform: 'scale(1.12)', offset: .6 }, { transform: 'none' }], { duration: 520, easing: 'ease-out' });
+    M.anim(ic, [{ opacity: 1, transform: 'none' }, { opacity: .15, transform: 'scale(.5)' }], { delay: 160, duration: 260, fill: 'forwards' });
+    await M.anim(fly, [
+      { transform: `translate(${x0}px, ${y0}px) scale(${s0})`, opacity: 0 },
+      { transform: `translate(${x0}px, ${y0 - 26}px) scale(${s0 * 1.7})`, opacity: 1, offset: .14 },
+      { transform: `translate(${xm}px, ${ym}px) scale(1.15) rotate(-16deg)`, offset: .56 },
+      { transform: `translate(${xc}px, ${yc}px) scale(1.7) rotate(0deg)` },
+    ], { delay: 180, duration: 1050, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+
+    // landing: squash, rays light up, the question mark pops and wiggles
+    M.anim(inner, [{ transform: 'scale(1.18, .8)' }, { transform: 'scale(.94, 1.08)', offset: .45 }, { transform: 'none' }], { duration: 560, easing: 'ease-out' });
+    M.anim($('.oi-rays', inner), [{ opacity: 0 }, { opacity: 1 }, { opacity: .55 }, { opacity: 1 }], { duration: 900 });
+    M.splash(innerWidth / 2, yc + S / 2, 'var(--kw)', { rings: 2, drops: 0, size: 70 });
+    await M.anim(q, [
+      { opacity: 0, transform: 'translateY(10px) scale(0) rotate(-30deg)' },
+      { opacity: 1, transform: 'translateY(-4px) scale(1.3) rotate(8deg)', offset: .6 },
+      { opacity: 1, transform: 'none' },
+    ], { delay: 120, duration: 520, easing: 'ease-out', fill: 'forwards' });
+    await M.anim(q, [{ transform: 'rotate(0)' }, { transform: 'rotate(-14deg)' }, { transform: 'rotate(12deg)' }, { transform: 'rotate(-6deg)' }, { transform: 'rotate(0)' }], { duration: 700, iterations: 1, easing: 'ease-in-out' });
+    await M.wait(250);
+    return { fly, q, ic };
+  }
+
   async function offer(api) {
     const M = window.Motion;
     if (api.hintsAlreadyAsked()) return;
     const dlg = $('#offer');
     const card = $('.offer-card', dlg);
+    const icon = $('.offer-icon', card);
     $('#offerNote', dlg).textContent = api.bottomBar() ? api.t('offerNoteBottom') : api.t('offerNoteLeft');
-    await M.wait(450);
+    await M.wait(350);
+
+    const jumped = M.reduced() ? null : await bulbJump(api, dlg);
+
     dlg.showModal();
     M.anim(dlg, [{ opacity: 0 }, { opacity: 1 }], { duration: 400 });
-    M.anim($('.offer-icon', card), [{ opacity: 0, transform: 'scale(.3) rotate(-30deg)' }, { opacity: 1, transform: 'none' }], { delay: 100, duration: 800, easing: M.SPRING });
-    M.anim($('.oi-ring', card), [{ strokeDashoffset: 190 }, { strokeDashoffset: 0 }], { delay: 200, duration: 1100 });
-    M.anim($('.oi-rays', card), [{ opacity: 0 }, { opacity: 1 }], { delay: 900, duration: 400 });
-    M.rise($('h2', card), 220, 16, 700);
-    $$('.offer-list li', card).forEach((li, i) => M.rise(li, 380 + i * 110, 14, 600));
-    M.rise($('.offer-actions', card), 760, 12, 600);
-    M.rise($('.offer-note', card), 900, 8, 600);
+    if (jumped) {
+      // the flying bulb settles exactly where the offer's icon sits
+      icon.style.visibility = 'hidden';
+      const tr = icon.getBoundingClientRect();
+      M.anim(jumped.q, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-14px) scale(.6)' }], { duration: 300, fill: 'forwards' });
+      const from = getComputedStyle(jumped.fly).transform;
+      await M.anim(jumped.fly, [{ transform: from }, { transform: `translate(${tr.left}px, ${tr.top}px) scale(${tr.width / 84})` }], { duration: 650, easing: M.SWING, fill: 'forwards' });
+      icon.style.visibility = '';
+      jumped.fly.remove();
+      M.anim(icon, [{ transform: 'scale(1.12)' }, { transform: 'none' }], { duration: 420, easing: M.SPRING });
+      M.anim($('.oi-ring', card), [{ strokeDashoffset: 190 }, { strokeDashoffset: 0 }], { duration: 900 });
+    } else {
+      M.anim(icon, [{ opacity: 0, transform: 'scale(.3) rotate(-30deg)' }, { opacity: 1, transform: 'none' }], { delay: 100, duration: 800, easing: M.SPRING });
+      M.anim($('.oi-ring', card), [{ strokeDashoffset: 190 }, { strokeDashoffset: 0 }], { delay: 200, duration: 1100 });
+      M.anim($('.oi-rays', card), [{ opacity: 0 }, { opacity: 1 }], { delay: 900, duration: 400 });
+    }
+    M.rise($('h2', card), 120, 16, 700);
+    $$('.offer-list li', card).forEach((li, i) => M.rise(li, 260 + i * 110, 14, 600));
+    M.rise($('.offer-actions', card), 620, 12, 600);
+    M.rise($('.offer-note', card), 760, 8, 600);
     $('[data-offer="on"]', card).focus({ preventScroll: true });
 
     const choice = await new Promise((resolve) => {
@@ -204,18 +269,73 @@ window.PPSIntro = (() => {
       dlg.addEventListener('cancel', onCancel);
     });
 
+    // back into the button
     const btn = api.hintsButton();
-    const br = btn.getBoundingClientRect();
+    const ic = btn.querySelector('.ic');
+    const br = ic.getBoundingClientRect();
     M.anim(dlg, [{ backgroundColor: getComputedStyle(dlg).backgroundColor }, { backgroundColor: 'transparent' }], { duration: 700, fill: 'forwards' });
-    await M.flyTo(card, br, { duration: 750, endOpacity: 0, easing: 'cubic-bezier(.6, 0, .3, 1)' });
+    await M.flyTo(card, br, { duration: 720, endOpacity: 0, easing: 'cubic-bezier(.6, 0, .3, 1)' });
     dlg.close();
     dlg.getAnimations({ subtree: true }).forEach((x) => x.cancel());
     card.style.transform = '';
     api.setHints(choice);
-    M.anim(btn, [{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }, { transform: 'scale(1)' }], { duration: 600, easing: M.SPRING });
+
+    // splash: rings spread over the rail like water, drops fly off, the bulb bounces back in
+    const fresh = btn.querySelector('.ic');
+    fresh.getAnimations().forEach((x) => x.cancel());
+    const c = fresh.getBoundingClientRect();
+    M.splash(c.left + c.width / 2, c.top + c.height / 2, 'var(--kw)', { rings: 3, drops: 14, size: 54 });
+    M.anim(fresh, [
+      { opacity: 0, transform: 'translateY(-14px) scale(.3)' },
+      { opacity: 1, transform: 'translateY(3px) scale(1.35, .8)', offset: .5 },
+      { transform: 'scale(.92, 1.1)', offset: .75 },
+      { opacity: 1, transform: 'none' },
+    ], { duration: 640, easing: 'ease-out' });
+    M.anim(btn, [{ transform: 'scale(1)' }, { transform: 'scale(.9)', offset: .35 }, { transform: 'scale(1.08)', offset: .7 }, { transform: 'scale(1)' }], { duration: 560, easing: 'ease-out' });
     btn.classList.add('ping');
     setTimeout(() => btn.classList.remove('ping'), 2400);
   }
 
-  return { play, offer };
+  /* First visit, after the tour: no dialog, just the bulb. It jumps out of the Tipps button,
+     shows a "?", and jumps back in with a splash. Hints stay off until someone presses the button. */
+  async function bulbHint(api) {
+    const M = window.Motion;
+    if (api.hintsAlreadyAsked()) return;
+    api.markHintsAsked();
+    if (M.reduced()) return;
+    await M.wait(350);
+    const dlg = $('#offer');
+    const jumped = await bulbJump(api, dlg);
+    await M.wait(500);
+    const btn = api.hintsButton();
+    const ic = btn.querySelector('.ic');
+    const r = ic.getBoundingClientRect();
+    const S = 84;
+    const from = getComputedStyle(jumped.fly).transform;
+    M.anim(jumped.q, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-12px) scale(.5)' }], { duration: 260, fill: 'forwards' });
+    const x1 = r.left + r.width / 2 - S / 2;
+    const y1 = r.top + r.height / 2 - S / 2;
+    const xm = (x1 + innerWidth / 2 - S / 2) / 2;
+    const ym = Math.min(y1, innerHeight * 0.4) - Math.min(140, innerHeight * 0.16);
+    await M.anim(jumped.fly, [
+      { transform: from },
+      { transform: `translate(${xm}px, ${ym}px) scale(1.05) rotate(14deg)`, offset: .45 },
+      { transform: `translate(${x1}px, ${y1}px) scale(${r.width / S})` },
+    ], { duration: 900, easing: 'cubic-bezier(.5, 0, .3, 1)', fill: 'forwards' });
+    jumped.fly.remove();
+    const fresh = btn.querySelector('.ic');
+    fresh.getAnimations().forEach((x) => x.cancel());
+    M.splash(r.left + r.width / 2, r.top + r.height / 2, 'var(--kw)', { rings: 3, drops: 14, size: 54 });
+    M.anim(fresh, [
+      { opacity: 0, transform: 'translateY(-14px) scale(.3)' },
+      { opacity: 1, transform: 'translateY(3px) scale(1.35, .8)', offset: .5 },
+      { transform: 'scale(.92, 1.1)', offset: .75 },
+      { opacity: 1, transform: 'none' },
+    ], { duration: 640, easing: 'ease-out' });
+    M.anim(btn, [{ transform: 'scale(1)' }, { transform: 'scale(.9)', offset: .35 }, { transform: 'scale(1.08)', offset: .7 }, { transform: 'scale(1)' }], { duration: 560, easing: 'ease-out' });
+    btn.classList.add('ping');
+    setTimeout(() => btn.classList.remove('ping'), 2400);
+  }
+
+  return { play, offer, bulbHint };
 })();

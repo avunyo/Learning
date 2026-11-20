@@ -940,3 +940,23 @@ a.tile:hover { background: var(--surface-2); transform: translateY(-2px); }
   .q-tab > span:last-child { display: none; }
   .q-tab[aria-selected="true"] > span:last-child { display: inline; }
 }
+
+/* ============ Bulb jumping out of the Tipps button, splash on the way back ============ */
+.bulb-fly { position: fixed; left: 0; top: 0; z-index: 120; width: 84px; height: 84px; pointer-events: none; transform-origin: 0 0; color: var(--kw); will-change: transform; }
+.bulb-in { position: relative; width: 100%; height: 100%; transform-origin: 50% 100%; filter: drop-shadow(0 0 18px color-mix(in srgb, var(--kw) 55%, transparent)); }
+.bulb-in svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.bulb-q {
+  position: absolute;
+  top: -30px; right: -22px;
+  display: grid; place-items: center;
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+  font: 700 21px/1 var(--font-display);
+  box-shadow: 0 6px 16px -6px rgba(0, 0, 0, .5);
+  opacity: 0;
+  transform-origin: 30% 90%;
+}
+.splash-ring { position: fixed; z-index: 121; border-radius: 50%; border: 3px solid; pointer-events: none; }
+.splash-drop { position: fixed; z-index: 121; border-radius: 50%; pointer-events: none; }

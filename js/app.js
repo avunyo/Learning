@@ -1493,6 +1493,10 @@ def _trace_run(code):
       $$('.ghost', el.win).forEach((g, i) => M.anim(g, [{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], { delay: 80 + i * 90, duration: 420 }));
     }
     if (opts.toast) toast(on ? t('hintsToastOn') : t('hintsToastOff'));
+    if (opts.splash && on) {
+      const c = el.hintsBtn.querySelector('.ic').getBoundingClientRect();
+      M.splash(c.left + c.width / 2, c.top + c.height / 2, 'var(--kw)', { rings: 2, drops: 8, size: 46 });
+    }
     if (on) {
       $$('.hint-only').forEach((n) => { if (n.offsetParent) M.anim(n, [{ opacity: 0, transform: 'scale(.8)' }, { opacity: 1, transform: 'none' }], { duration: 480, easing: M.SPRING }); });
       M.anim(el.hintsBtn, [{ boxShadow: '0 0 0 0 color-mix(in srgb, var(--kw) 55%, transparent)' }, { boxShadow: '0 0 0 14px transparent' }], { duration: 800, easing: 'ease-out' });
@@ -1549,7 +1553,7 @@ def _trace_run(code):
     } else if (nav === 'quests') location.hash = `#/quests/${quest.tab}`;
     else if (nav === 'helper') setPanel(!state.panelOpen, { focus: true });
     else if (nav === 'sandbox') openSandbox();
-    else if (nav === 'hints') setHints(!state.hints, { toast: true });
+    else if (nav === 'hints') setHints(!state.hints, { toast: true, splash: true });
     else if (nav === 'lang') openLangMenu(el.langMenu.hidden);
     else if (nav === 'theme') toggleTheme(b);
   }));
@@ -2071,7 +2075,7 @@ def _trace_run(code):
   /* first visit: tour, then the hints offer */
   function afterReveal() {
     const next = store.get('pps-tour', false) ? Promise.resolve() : runTour();
-    return next.then(() => { if (!store.get('pps-hints-asked', false)) return window.PPSIntro.offer(introApi()); });
+    return next.then(() => window.PPSIntro.bulbHint(introApi()));
   }
 
   /* ---------------- Intro + hints offer ---------------- */
@@ -2092,6 +2096,7 @@ def _trace_run(code):
       hideWindow(h) { el.win.style.visibility = h ? 'hidden' : ''; },
       hintsButton: () => el.hintsBtn,
       hintsAlreadyAsked: () => !!store.get('pps-hints-asked', false),
+      markHintsAsked: () => store.set('pps-hints-asked', true),
       setHints(on) { store.set('pps-hints-asked', true); setHints(on, { toast: on }); },
       bottomBar: () => matchMedia('(max-width: 720px)').matches,
     };
