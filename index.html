@@ -1,15 +1,28 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Пайтон по шагам</title>
-  <meta name="description" content="Python с нуля: смотри, как устроен код, запускай его прямо в браузере и проходи уроки по шагам.">
+  <title>Python step by step</title>
+  <meta name="description" content="Python from zero: see how code works, run it right in your browser and learn one step at a time.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Python step by step">
+  <meta property="og:title" content="Python step by step">
+  <meta property="og:description" content="Python from zero: see how code works, run it right in your browser and learn one step at a time.">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="de_DE">
+  <meta property="og:locale:alternate" content="ru_RU">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Python step by step">
+  <meta name="twitter:description" content="Python from zero: see how code works, run it right in your browser and learn one step at a time.">
+  <link rel="alternate" hreflang="de" href="/de/">
+  <link rel="alternate" hreflang="ru" href="/ru/">
+  <link rel="alternate" hreflang="en" href="/en/">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=9">
-  <link rel="stylesheet" href="css/motion.css?v=9">
+  <link rel="stylesheet" href="css/style.css?v=15">
+  <link rel="stylesheet" href="css/motion.css?v=15">
   <script>
     try { var t = localStorage.getItem('pps-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
     document.documentElement.classList.add('pre-reveal');
@@ -23,6 +36,7 @@
       </a>
       <button class="rail-btn" data-nav="start" type="button"><span class="ic" data-icon="home"></span><span data-i18n="navStart"></span></button>
       <button class="rail-btn" data-nav="lessons" type="button"><span class="ic" data-icon="grid"></span><span data-i18n="navLessons"></span></button>
+      <button class="rail-btn rail-quests" data-nav="quests" type="button"><span class="ic" data-icon="quest"></span><span data-i18n="navQuests"></span></button>
       <button class="rail-btn rail-helper" data-nav="helper" type="button" aria-expanded="false" aria-controls="panel"><span class="ic" data-icon="panel"></span><span data-i18n="navHelper"></span></button>
       <button class="rail-btn" data-nav="sandbox" type="button"><span class="ic" data-icon="terminal"></span><span data-i18n="navSandbox"></span></button>
       <button class="rail-btn rail-hints" data-nav="hints" type="button" aria-pressed="false"><span class="ic" data-icon="bulb"></span><span data-i18n="navHints"></span></button>
@@ -57,6 +71,7 @@
         <div class="win-slot" id="win"></div>
       </div>
       <div class="stage-choices" id="stageChoices"></div>
+      <section class="quest-view" id="questView" hidden></section>
       <p class="diagram-hint" data-i18n="diagramHint"></p>
     </main>
 
@@ -121,13 +136,15 @@
     </div>
   </dialog>
 
-  <script src="js/i18n.js?v=9"></script>
-  <script src="js/lessons.ru.js?v=9"></script>
-  <script src="js/lessons.en.js?v=9"></script>
-  <script src="js/lessons.de.js?v=9"></script>
-  <script src="js/motion.js?v=9"></script>
-  <script src="js/intro.js?v=9"></script>
-  <script src="js/tour.js?v=9"></script>
-  <script src="js/app.js?v=9"></script>
+  <script src="js/i18n.js?v=15"></script>
+  <script src="js/lessons.ru.js?v=15"></script>
+  <script src="js/lessons.en.js?v=15"></script>
+  <script src="js/lessons.de.js?v=15"></script>
+  <script src="js/quests.js?v=15"></script>
+  <script src="js/tasks.js?v=15"></script>
+  <script src="js/motion.js?v=15"></script>
+  <script src="js/intro.js?v=15"></script>
+  <script src="js/tour.js?v=15"></script>
+  <script src="js/app.js?v=15"></script>
 </body>
 </html>

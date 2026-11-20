@@ -16,6 +16,13 @@
 
   /* ---------------- Language & state ---------------- */
   function pickLang() {
+    /* a language link (/de, /ru, /en) arrives as ?lang=xx: take it, remember it, tidy the address */
+    const fromUrl = new URLSearchParams(location.search).get('lang');
+    if (fromUrl && window.UI[fromUrl]) {
+      store.set('pps-lang', fromUrl);
+      history.replaceState(null, '', location.pathname + location.hash);
+      return fromUrl;
+    }
     const saved = store.get('pps-lang', null);
     if (saved && window.UI[saved]) return saved;
     const nav = (navigator.languages || [navigator.language || '']).map((l) => String(l).slice(0, 2).toLowerCase());
@@ -32,6 +39,7 @@
     view: 'start',
     lessonId: null,
     tab: 'learn',
+    taskStep: 0,
     mode: store.get('pps-mode', null),
     done: new Set(store.get('pps-done', [])),
     hints: !!store.get('pps-hints', false),
@@ -49,9 +57,17 @@
     return typeof v === 'function' ? v(...args) : v;
   }
 
+  /* ---------------- Task steps ---------------- */
+  const solvedSteps = store.get('pps-steps', {});
+  const taskSteps = (l) => ((window.TASKS || {})[state.lang] || {})[l.id] || [l.task];
+  const solvedOf = (l) => (state.done.has(l.id) ? taskSteps(l).length : Math.min(solvedSteps[l.id] || 0, taskSteps(l).length));
+  const nextStepOf = (l) => Math.min(solvedOf(l), taskSteps(l).length - 1);
+  const curTask = () => taskSteps(lesson())[state.taskStep] || taskSteps(lesson())[0];
+
   /* ---------------- Icons ---------------- */
   const ICONS = {
     home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
+    book: '<path d="M4 19V5a2 2 0 012-2h13v14H6a2 2 0 00-2 2zm0 0a2 2 0 002 2h13"/><path d="M8 7h7"/>',
     grid: '<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>',
     terminal: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3-3 3"/><path d="M12.5 15H17"/>',
     bulb: '<path d="M9 17.5h6M10 21h4"/><path d="M8.5 14.5C7 13.3 6 11.5 6 9.5a6 6 0 0112 0c0 2-1 3.8-2.5 5-.7.6-1 1.3-1 2v1h-5v-1c0-.7-.3-1.4-1-2z"/>',
@@ -71,6 +87,8 @@
     panel: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M14.5 4v16"/><path d="M17 8.5h1.5M17 12h1.5"/>',
     task: '<rect x="4" y="3" width="16" height="18" rx="2.5"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
     speaker: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/>',
+    flame: '<path d="M12 21c-4 0-7-2.7-7-6.5 0-3 2-5.2 3.5-6.6.4 1.6 1.3 2.6 2.3 3.1C10.5 7.5 12 4.6 14.5 3c-.4 2.8.8 4.6 2.2 6.1C18 10.6 19 12.3 19 14.5c0 3.8-3 6.5-7 6.5z"/><path d="M12 21c-1.7 0-3-1.2-3-2.9 0-1.6 1.2-2.7 2.2-3.5.3 1 .9 1.6 1.6 1.8.4-1 1-1.7 1.6-2.2.6 1 1.6 2 1.6 3.8 0 1.7-1.3 3-3 3z"/>',
+    quest: '<path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>',
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
     download: '<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/>',
     screen: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M7 9h6M7 12.5h9M9 21h6"/>',
@@ -204,7 +222,7 @@
   /* ---------------- Elements ---------------- */
   const el = {
     stage: $('#stage'), kicker: $('#stageKicker'), title: $('#stageTitle'), heading: $('.stage-heading'),
-    diagram: $('#diagram'), win: $('#win'), stageChoices: $('#stageChoices'), notePop: $('#notePop'),
+    diagram: $('#diagram'), win: $('#win'), questView: $('#questView'), stageChoices: $('#stageChoices'), notePop: $('#notePop'),
     flyout: $('#flyout'), coach: $('#coach'), scrim: $('#panelScrim'), panelClose: $('#panelClose'), helperBtn: $('[data-nav="helper"]'),
     panelBody: $('#panelBody'), panelRunner: $('#panelRunner'), panelNav: $('#panelNav'), panel: $('#panel'),
     progress: $('#progress'), sandbox: $('#sandbox'),
@@ -266,6 +284,17 @@
   let stageToken = 0;
   async function renderStage(opts = {}) {
     const token = ++stageToken;
+    const isQuests = state.view === 'quests';
+    el.stage.classList.toggle('is-quests', isQuests);
+    el.questView.hidden = !isQuests;
+    if (isQuests) {
+      hideNote(true);
+      el.kicker.textContent = t('questsKicker');
+      el.title.textContent = t('questsTitle');
+      if (opts.animate && state.revealed) M.rise(el.heading, 0, 8, 420);
+      renderQuests(opts.animate && state.revealed);
+      return;
+    }
     const d = currentData();
     const mode = effectiveMode();
     const animate = opts.animate && state.revealed && !M.reduced();
@@ -326,13 +355,17 @@
       /* the task of this lesson, visible right away under the editor */
       const l = lesson();
       const done = state.done.has(l.id);
+      const steps = taskSteps(l);
+      const k = done ? steps.length - 1 : nextStepOf(l);
+      const solved = solvedOf(l);
       el.stageChoices.hidden = false;
       el.stageChoices.innerHTML = `
         <div class="task-card${done ? ' is-done' : ''}">
           <span class="tc-ic">${icon(done ? 'check' : 'task')}</span>
           <div class="tc-body">
-            <span class="tc-label">${esc(t('tabTask'))}${done ? ` · ${esc(t('taskDone'))}` : ''}</span>
-            <p class="tc-text">${l.task.text}</p>
+            <span class="tc-label">${esc(t('tabTask'))} · ${done ? esc(t('taskDone')) : esc(t('taskStepOf', k + 1, steps.length))}</span>
+            <p class="tc-text">${done ? steps[steps.length - 1].text : steps[k].text}</p>
+            <span class="tc-steps" aria-hidden="true">${steps.map((_, i) => `<i class="${i < solved ? 'on' : ''}${i === k && !done ? ' cur' : ''}"></i>`).join('')}</span>
           </div>
           <button class="btn ${done ? '' : 'primary '}tc-go" type="button" data-dock="task">${esc(done ? t('taskAgain') : t('taskSolve'))}${icon('right')}</button>
         </div>`;
@@ -916,7 +949,16 @@ def _trace_run(code):
     labels();
     return {
       root,
-      set(code) { original = code; ta.value = code; shown = false; closeSteps(); setBand(null); sync(); labels(); },
+      set(code) {
+        original = code; ta.value = code; shown = false; closeSteps(); setBand(null); sync(); labels();
+        /* put the cursor where the answer goes: an empty indented line, else inside empty brackets, else at the end */
+        let at = code.length;
+        const blank = /\n( +)\n?$/.test(code);
+        const brackets = code.indexOf('()');
+        if (blank) at = code.length - (code.endsWith('\n') ? 1 : 0);
+        else if (brackets >= 0) at = brackets + 1;
+        ta.setSelectionRange(at, at);
+      },
       setRun(key) { runKey = key; labels(); },
       labels,
       refreshHints() { if (!state.hints) { if (trace) closeSteps(); if (band.dataset.kind === 'err') setBand(null); } lastWord = null; updateWord(); sync(); },
@@ -926,7 +968,7 @@ def _trace_run(code):
   /* ---------------- Panel ---------------- */
   const panelRunner = makeRunner(el.panelRunner, {
     title: () => t('tryIt'),
-    getInputs: () => (state.view === 'lesson' && state.tab === 'task' ? lesson().task.inputs || null : null),
+    getInputs: () => (state.view === 'lesson' && state.tab === 'task' ? curTask().inputs || null : null),
     onResult: (code, res) => { if (state.view === 'lesson' && state.tab === 'task') checkTask(code, res); },
   });
 
@@ -1086,7 +1128,7 @@ def _trace_run(code):
 
   function renderPanel(opts = {}) {
     const animate = opts.animate && state.revealed;
-    if (state.view === 'start') {
+    if (state.view !== 'lesson') {
       const s = content().start;
       stopReading();
       el.panelBody.innerHTML = `
@@ -1134,13 +1176,22 @@ def _trace_run(code):
     } else {
       stopReading();
       stopNarration();
+      const steps = taskSteps(l);
+      const solved = solvedOf(l);
+      const k = state.taskStep;
+      const st = steps[k];
       body.innerHTML = `<div class="prose task-box" role="tabpanel">
-          <p class="lead">${l.task.text}</p>
+          <ol class="stepper" aria-label="${esc(t('taskStepOf', k + 1, steps.length))}">${steps.map((_, i) => `
+            <li><button type="button" class="sp${i < solved ? ' on' : ''}${i === k ? ' cur' : ''}" data-step-go="${i}" ${i > solved ? 'disabled' : ''} aria-current="${i === k ? 'step' : 'false'}">
+              <span class="sp-n">${i < solved ? icon('check') : i + 1}</span></button>${i < steps.length - 1 ? `<span class="sp-line${i < solved ? ' on' : ''}"></span>` : ''}</li>`).join('')}
+          </ol>
+          <p class="step-of">${esc(t('taskStepOf', k + 1, steps.length))}</p>
+          <p class="lead">${st.text}</p>
           <p class="task-how">${esc(t('taskHow'))}</p>
-          ${l.task.hint ? `<details ${state.hints ? 'open' : ''}><summary>${esc(t('hint'))}</summary><p>${l.task.hint}</p></details>` : ''}
-          <div class="verdict ${done ? 'ok' : ''}" id="verdict">${done ? esc(t('alreadyDone')) : ''}</div>
+          ${st.hint ? `<details ${state.hints ? 'open' : ''}><summary>${esc(t('hint'))}</summary><p>${st.hint}</p></details>` : ''}
+          <div class="verdict ${k < solved ? 'ok' : ''}" id="verdict">${k < solved ? esc(done && k === steps.length - 1 ? t('alreadyDone') : t('stepSolvedBefore')) : ''}</div>
         </div>`;
-      panelRunner.set(l.task.starter);
+      panelRunner.set(st.starter || '');
       panelRunner.setRun('check');
     }
     if (animate) {
@@ -1149,6 +1200,24 @@ def _trace_run(code):
       M.anim(panelRunner.root, [{ opacity: .4 }, { opacity: 1 }], { duration: 360 });
     }
   }
+
+  function goStep(i) {
+    const l = lesson();
+    const steps = taskSteps(l);
+    if (i < 0 || i >= steps.length || i > solvedOf(l)) return;
+    const dir = i > state.taskStep ? 1 : -1;
+    state.taskStep = i;
+    renderTabBody(false);
+    const box = $('.task-box', el.panelBody);
+    $$(':scope > :not(.stepper)', box).forEach((n, j) => M.anim(n, [{ opacity: 0, transform: `translateX(${dir * 18}px)` }, { opacity: 1, transform: 'none' }], { delay: j * 40, duration: 460 }));
+    M.pop($('.sp.cur .sp-n', box), 60, 480);
+    M.anim(panelRunner.root, [{ opacity: .4 }, { opacity: 1 }], { duration: 360 });
+    $('textarea', el.panelRunner).focus({ preventScroll: true });
+  }
+  el.panel.addEventListener('click', (e) => {
+    const sg = e.target.closest('[data-step-go]');
+    if (sg) { goStep(Number(sg.dataset.stepGo)); return; }
+  });
 
   el.panel.addEventListener('click', (e) => {
     const tb = e.target.closest('[data-tab]');
@@ -1184,7 +1253,9 @@ def _trace_run(code):
 
   function checkTask(code, res) {
     const l = lesson();
-    const task = l.task;
+    const steps = taskSteps(l);
+    const k = state.taskStep;
+    const task = steps[k];
     const v = $('#verdict');
     if (!v) return;
     let fail = null;
@@ -1200,7 +1271,30 @@ def _trace_run(code):
     if (fail) {
       v.className = 'verdict no';
       v.innerHTML = fail;
-      M.anim(v, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 360 });
+      M.anim(v, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { delay: 0, duration: 360 });
+      return;
+    }
+    /* step solved */
+    const wasSolved = solvedOf(l);
+    if (k + 1 > (solvedSteps[l.id] || 0)) { solvedSteps[l.id] = k + 1; store.set('pps-steps', solvedSteps); }
+    const sp = $(`.sp[data-step-go="${k}"]`, el.panelBody);
+    if (sp) {
+      sp.classList.add('on');
+      sp.querySelector('.sp-n').innerHTML = icon('check');
+      M.pop(sp.querySelector('.sp-n'), 0, 520);
+      const line = sp.parentElement.querySelector('.sp-line');
+      if (line) { line.classList.add('on'); M.anim(line, [{ transform: 'scaleX(0)' }, { transform: 'none' }], { delay: 150, duration: 600 }); }
+      const nextSp = $(`.sp[data-step-go="${k + 1}"]`, el.panelBody);
+      if (nextSp) nextSp.disabled = false;
+    }
+    if (k < steps.length - 1) {
+      v.className = 'verdict ok';
+      v.innerHTML = `<span class="v-check">${icon('check')}</span><span>${esc(t('stepSolved'))}<br><button class="btn primary small step-next" type="button" data-step-go="${k + 1}">${esc(t('nextStep', k + 2))}${icon('right')}</button></span>`;
+      M.anim(v, [{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: M.SPRING });
+      M.pop($('.v-check', v), 120, 520);
+      if (wasSolved <= k) burst($('.v-check', v));
+      renderStageChoices();
+      $('.step-next', v).focus({ preventScroll: true });
       return;
     }
     const first = !state.done.has(l.id);
@@ -1452,12 +1546,297 @@ def _trace_run(code):
     else if (nav === 'lessons') {
       openLauncher(true);
       if (matchMedia('(max-width: 1100px)').matches) el.dock.scrollIntoView({ behavior: M.reduced() ? 'auto' : 'smooth', block: 'center' });
-    } else if (nav === 'helper') setPanel(!state.panelOpen, { focus: true });
+    } else if (nav === 'quests') location.hash = `#/quests/${quest.tab}`;
+    else if (nav === 'helper') setPanel(!state.panelOpen, { focus: true });
     else if (nav === 'sandbox') openSandbox();
     else if (nav === 'hints') setHints(!state.hints, { toast: true });
     else if (nav === 'lang') openLangMenu(el.langMenu.hidden);
     else if (nav === 'theme') toggleTheme(b);
   }));
+
+  /* ---------------- Quests: quest of the day, chapter quizzes, project ideas ---------------- */
+  const QD = () => (window.QUESTS || {})[state.lang] || window.QUESTS.ru;
+  const LEVELS = ['easy', 'medium', 'hard'];
+  const Q_TABS = ['daily', 'chapters', 'projects'];
+  const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const dayNum = () => Math.floor((Date.now() - new Date().getTimezoneOffset() * 60000) / 86400000);
+  const dailyLog = store.get('pps-daily', {});
+  const quizBest = store.get('pps-quiz', {});
+  const quest = { tab: 'daily', level: 'easy', quiz: null };
+  let questRunner = null;
+  const questRunnerHost = document.createElement('div');
+
+  function dailyTask(lvl) {
+    const pool = QD().daily[lvl];
+    const shift = { easy: 0, medium: 2, hard: 4 }[lvl];
+    return pool[(dayNum() + shift) % pool.length];
+  }
+  const doneToday = () => dailyLog[dayKey()] || [];
+  function streak() {
+    let n = 0;
+    const d = new Date();
+    if (!(dailyLog[dayKey(d)] || []).length) d.setDate(d.getDate() - 1);
+    while ((dailyLog[dayKey(d)] || []).length) { n++; d.setDate(d.getDate() - 1); }
+    return n;
+  }
+  function untilMidnight() {
+    const now = new Date();
+    const end = new Date(now);
+    end.setHours(24, 0, 0, 0);
+    const mins = Math.max(0, Math.round((end - now) / 60000));
+    return t('newIn', Math.floor(mins / 60), mins % 60);
+  }
+
+  /* shared by the quests: returns why the solution fails, or null when it is right */
+  function evaluateTask(task, code, res) {
+    if (res.error) return esc(t('failError'));
+    for (const m of task.must || []) { if (!new RegExp(m.re).test(code)) return m.hint; }
+    for (const m of task.forbid || []) { if (new RegExp(m.re).test(code)) return m.hint; }
+    const out = norm(res.out || '');
+    if (task.expect != null && out !== norm(task.expect)) return `${esc(t('failOutput'))}<pre>${esc(task.expect)}</pre>`;
+    if (task.includes != null && !out.includes(task.includes)) return t('failIncludes', esc(task.includes));
+    return null;
+  }
+
+  const LEVEL_DOTS = (lvl) => `<span class="lvl-dots" aria-hidden="true">${[0, 1, 2].map((i) => `<i class="${i <= LEVELS.indexOf(lvl) ? 'on' : ''}"></i>`).join('')}</span>`;
+  const plain = (html) => html.replace(/<[^>]+>/g, '').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+
+  function renderQuests(animate) {
+    const tabs = [
+      ['daily', 'flame', t('qTabDaily')],
+      ['chapters', 'book', t('qTabChapters')],
+      ['projects', 'bulb', t('qTabProjects')],
+    ];
+    el.questView.innerHTML = `
+      <div class="q-tabs" role="tablist">
+        <span class="q-tabs-thumb" aria-hidden="true"></span>
+        ${tabs.map(([id, ic, label]) => `<a class="q-tab" role="tab" href="#/quests/${id}" aria-selected="${quest.tab === id}">${icon(ic)}<span>${esc(label)}</span></a>`).join('')}
+      </div>
+      <div class="q-body"></div>`;
+    moveThumb($('.q-tabs', el.questView), $('.q-tabs-thumb', el.questView), '[aria-selected="true"]', true);
+    renderQuestBody(animate);
+  }
+
+  function renderQuestBody(animate) {
+    const body = $('.q-body', el.questView);
+    if (quest.tab === 'daily') renderDaily(body);
+    else if (quest.tab === 'chapters') { if (quest.quiz) renderQuiz(body); else renderChapters(body); }
+    else renderProjects(body);
+    if (animate) $$('.q-anim', body).forEach((n, i) => M.anim(n, [{ opacity: 0, transform: 'translateY(14px) scale(.98)' }, { opacity: 1, transform: 'none' }], { delay: i * 55, duration: 520, easing: M.SPRING }));
+  }
+
+  /* ---- quest of the day ---- */
+  function renderDaily(body) {
+    const done = doneToday();
+    const s = streak();
+    const task = dailyTask(quest.level);
+    body.innerHTML = `
+      <div class="q-head q-anim">
+        <p>${esc(t('dailyIntro'))}</p>
+        <div class="q-meta">
+          <span class="q-streak${s ? ' on' : ''}">${icon('flame')}${esc(t('streak', s))}</span>
+          <span class="q-timer">${esc(untilMidnight())}</span>
+        </div>
+      </div>
+      <div class="q-levels">${LEVELS.map((lvl) => `
+        <button class="level-card q-anim${quest.level === lvl ? ' is-cur' : ''}${done.includes(lvl) ? ' is-done' : ''}" type="button" data-level="${lvl}" data-lvl="${lvl}" aria-pressed="${quest.level === lvl}">
+          <span class="lc-top">${LEVEL_DOTS(lvl)}<b>${esc(t('lvl')[lvl])}</b>${done.includes(lvl) ? `<span class="lc-done">${icon('check')}</span>` : ''}</span>
+          <span class="lc-text">${esc(plain(dailyTask(lvl).text))}</span>
+        </button>`).join('')}
+      </div>
+      <div class="q-work q-anim" data-lvl="${quest.level}">
+        <p class="q-work-lvl">${LEVEL_DOTS(quest.level)}${esc(t('lvl')[quest.level])}</p>
+        <p class="lead">${task.text}</p>
+        ${task.hint ? `<details ${state.hints ? 'open' : ''}><summary>${esc(t('hint'))}</summary><p>${task.hint}</p></details>` : ''}
+        <div class="verdict ${done.includes(quest.level) ? 'ok' : ''}" id="qVerdict">${done.includes(quest.level) ? esc(t('questSolved')) : ''}</div>
+        <div class="q-runner"></div>
+      </div>`;
+    if (!questRunner) {
+      questRunner = makeRunner(questRunnerHost, {
+        title: () => t('questRunTitle'),
+        getInputs: () => (state.view === 'quests' && quest.tab === 'daily' ? dailyTask(quest.level).inputs || null : null),
+        onResult: checkDaily,
+      });
+    }
+    $('.q-runner', body).append(questRunnerHost);
+    questRunner.labels();
+    questRunner.set(task.starter || '');
+    questRunner.setRun('check');
+  }
+
+  function checkDaily(code, res) {
+    const v = $('#qVerdict');
+    if (!v) return;
+    const fail = evaluateTask(dailyTask(quest.level), code, res);
+    if (fail) {
+      v.className = 'verdict no';
+      v.innerHTML = fail;
+      M.anim(v, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 360 });
+      return;
+    }
+    const key = dayKey();
+    const list = dailyLog[key] || (dailyLog[key] = []);
+    const first = !list.includes(quest.level);
+    if (first) list.push(quest.level);
+    store.set('pps-daily', dailyLog);
+    const all = LEVELS.every((l) => list.includes(l));
+    v.className = 'verdict ok';
+    v.innerHTML = `<span class="v-check">${icon('check')}</span><span>${esc(t('questSolved'))}${all ? `<br>${esc(t('allDaily'))}` : ''}${!all ? `<br><button class="btn primary small q-next-level" type="button">${esc(t('quizNext'))}${icon('right')}</button>` : ''}</span>`;
+    M.anim(v, [{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: M.SPRING });
+    M.pop($('.v-check', v), 120, 520);
+    if (first) burst($('.v-check', v));
+    const card = $(`.level-card[data-level="${quest.level}"]`, el.questView);
+    if (card && first) {
+      card.classList.add('is-done');
+      $('.lc-top', card).insertAdjacentHTML('beforeend', `<span class="lc-done">${icon('check')}</span>`);
+      M.pop($('.lc-done', card), 100, 520);
+    }
+    const st = $('.q-streak', el.questView);
+    if (st) { st.classList.add('on'); st.lastChild.textContent = t('streak', streak()); M.anim(st, [{ transform: 'scale(1.15)' }, { transform: 'none' }], { duration: 500, easing: M.SPRING }); }
+  }
+
+  el.questView.addEventListener('click', (e) => {
+    const lc = e.target.closest('.level-card');
+    if (lc) {
+      if (lc.dataset.level === quest.level) return;
+      quest.level = lc.dataset.level;
+      renderDaily($('.q-body', el.questView));
+      M.anim($('.q-work', el.questView), [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 420 });
+      return;
+    }
+    if (e.target.closest('.q-next-level')) {
+      const next = LEVELS.find((l) => !doneToday().includes(l));
+      if (next) { quest.level = next; renderDaily($('.q-body', el.questView)); M.anim($('.q-work', el.questView), [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 420 }); }
+      return;
+    }
+    const cc = e.target.closest('[data-quiz]');
+    if (cc) { startQuiz(cc.dataset.quiz); return; }
+    const opt = e.target.closest('.q-opt');
+    if (opt && quest.quiz && !quest.quiz.answered) { answerQuiz(Number(opt.dataset.i)); return; }
+    if (e.target.closest('.quiz-next')) { quest.quiz.i++; quest.quiz.answered = false; renderQuiz($('.q-body', el.questView), true); return; }
+    if (e.target.closest('.quiz-back')) { quest.quiz = null; renderChapters($('.q-body', el.questView)); animateIn(); return; }
+    if (e.target.closest('.quiz-retry')) { startQuiz(quest.quiz.id); return; }
+    const ps = e.target.closest('[data-project]');
+    if (ps) {
+      const [lvl, i] = ps.dataset.project.split(':');
+      store.set('pps-sandbox', QD().projects[lvl][Number(i)].starter);
+      openSandbox();
+    }
+  });
+  function animateIn() {
+    $$('.q-anim', el.questView).forEach((n, i) => M.anim(n, [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { delay: i * 45, duration: 460 }));
+  }
+
+  /* ---- chapter quests ---- */
+  function renderChapters(body) {
+    body.innerHTML = `
+      <p class="q-intro q-anim">${esc(t('chaptersIntro'))}</p>
+      <div class="ch-grid">${lessons().map((l, i) => {
+        const n = (QD().quiz[l.id] || []).length;
+        const best = quizBest[l.id];
+        const full = best != null && best >= n;
+        return `<button class="ch-card q-anim${full ? ' is-done' : ''}" type="button" data-quiz="${l.id}" data-kind="${l.tone}">
+          <span class="ch-ic">${icon(l.icon)}${full ? `<span class="tile-done">${icon('check')}</span>` : ''}</span>
+          <span class="ch-n">${esc(t('chapterN', i + 1))}</span>
+          <span class="ch-t">${esc(l.short)}</span>
+          <span class="ch-score">${best == null ? esc(t('quizNew')) : esc(t('nOfM', best, n))}</span>
+        </button>`;
+      }).join('')}</div>`;
+  }
+
+  function shuffled(n, seed) {
+    const a = Array.from({ length: n }, (_, i) => i);
+    let x = seed * 9301 + 49297;
+    for (let i = n - 1; i > 0; i--) { x = (x * 9301 + 49297) % 233280; const j = Math.floor((x / 233280) * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+  function startQuiz(id) {
+    quest.quiz = { id, i: 0, score: 0, answered: false };
+    renderQuiz($('.q-body', el.questView), true);
+  }
+  function renderQuiz(body, animate) {
+    const qz = quest.quiz;
+    const qs = QD().quiz[qz.id] || [];
+    const l = lessons().find((x) => x.id === qz.id);
+    if (qz.i >= qs.length) {
+      const prev = quizBest[qz.id];
+      if (prev == null || qz.score > prev) { quizBest[qz.id] = qz.score; store.set('pps-quiz', quizBest); }
+      const all = qz.score === qs.length;
+      body.innerHTML = `
+        <div class="quiz q-anim">
+          <button class="link-btn quiz-back" type="button">${icon('left')}${esc(t('quizBack'))}</button>
+          <div class="quiz-result${all ? ' is-all' : ''}">
+            <span class="qr-score">${qz.score}<small> / ${qs.length}</small></span>
+            <p>${esc(all ? t('quizAll') : t('quizSome'))}</p>
+            <div class="qr-actions">
+              <button class="btn quiz-retry" type="button">${icon('reset')}${esc(t('quizRetry'))}</button>
+              <a class="btn primary" href="#/lesson/${qz.id}">${esc(t('quizToLesson'))}${icon('right')}</a>
+            </div>
+          </div>
+        </div>`;
+      M.anim($('.qr-score', body), [{ opacity: 0, transform: 'scale(.4)' }, { opacity: 1, transform: 'none' }], { duration: 700, easing: M.SPRING });
+      if (all) burst($('.qr-score', body));
+      return;
+    }
+    const q = qs[qz.i];
+    const order = shuffled(q.options.length, lessons().indexOf(l) * 10 + qz.i + 1);
+    body.innerHTML = `
+      <div class="quiz q-anim">
+        <div class="quiz-top">
+          <button class="link-btn quiz-back" type="button">${icon('left')}${esc(t('quizBack'))}</button>
+          <span class="quiz-of">${esc(l.short)} · ${esc(t('quizQ', qz.i + 1, qs.length))}</span>
+        </div>
+        <div class="quiz-bar"><span style="width:${(qz.i / qs.length) * 100}%"></span></div>
+        <h3 class="quiz-q">${q.q}</h3>
+        ${q.code ? `<pre class="q-code">${highlight(q.code)}</pre>` : ''}
+        <div class="q-opts">${order.map((oi, k) => `<button class="q-opt" type="button" data-i="${oi}"><span class="q-key">${'ABC'[k]}</span><code>${esc(q.options[oi])}</code></button>`).join('')}</div>
+        <div class="q-feedback" aria-live="polite"></div>
+      </div>`;
+    if (animate) {
+      M.anim($('.quiz-q', body), [{ opacity: 0, transform: 'translateX(16px)' }, { opacity: 1, transform: 'none' }], { duration: 420 });
+      $$('.q-code, .q-opt', body).forEach((n, i) => M.anim(n, [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { delay: 80 + i * 60, duration: 420 }));
+    }
+  }
+  function answerQuiz(i) {
+    const qz = quest.quiz;
+    const q = QD().quiz[qz.id][qz.i];
+    qz.answered = true;
+    const right = i === q.answer;
+    if (right) qz.score++;
+    $$('.q-opt', el.questView).forEach((b) => {
+      const oi = Number(b.dataset.i);
+      b.disabled = true;
+      if (oi === q.answer) { b.classList.add('is-right'); M.anim(b, [{ transform: 'scale(1)' }, { transform: 'scale(1.03)' }, { transform: 'none' }], { duration: 420, easing: M.SPRING }); }
+      else if (oi === i) { b.classList.add('is-wrong'); M.anim(b, [{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(-3px)' }, { transform: 'none' }], { duration: 380 }); }
+    });
+    const last = qz.i === QD().quiz[qz.id].length - 1;
+    const fb = $('.q-feedback', el.questView);
+    fb.className = `q-feedback ${right ? 'ok' : 'no'}`;
+    fb.innerHTML = `<b>${esc(right ? t('quizRight') : t('quizWrong'))}</b> <span>${q.why}</span><button class="btn primary small quiz-next" type="button">${esc(last ? t('quizResult') : t('quizNext'))}${icon('right')}</button>`;
+    M.anim(fb, [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 420 });
+    $('.quiz-bar span', el.questView).style.width = `${((qz.i + 1) / QD().quiz[qz.id].length) * 100}%`;
+    $('.quiz-next', el.questView).focus({ preventScroll: true });
+  }
+
+  /* ---- project ideas ---- */
+  function renderProjects(body) {
+    const P = QD().projects;
+    const lname = (id) => (lessons().find((l) => l.id === id) || {}).short || id;
+    body.innerHTML = `
+      <p class="q-intro q-anim">${esc(t('projectsIntro'))}</p>
+      <div class="pj-cols">${LEVELS.map((lvl) => `
+        <section class="pj-col" data-lvl="${lvl}">
+          <h3 class="pj-h q-anim">${LEVEL_DOTS(lvl)}${esc(t('lvl')[lvl])}</h3>
+          ${P[lvl].map((p, i) => `
+            <article class="pj-card q-anim">
+              <h4>${esc(p.title)}</h4>
+              <p>${esc(p.text)}</p>
+              <p class="pj-needs"><span>${esc(t('projectNeeds'))}</span>${p.needs.map((n) => `<a class="chip" href="#/lesson/${n}">${esc(lname(n))}</a>`).join('')}</p>
+              <button class="btn small pj-go" type="button" data-project="${lvl}:${i}">${icon('terminal')}${esc(t('projectStart'))}</button>
+            </article>`).join('')}
+        </section>`).join('')}
+      </div>`;
+  }
 
   /* ---------------- Whole-app entrance ---------------- */
   function revealApp(opts = {}) {
@@ -1510,9 +1889,13 @@ def _trace_run(code):
     hideCoach(true);
     applyPanelState();
     if (open) {
-      if (opts.tab && state.view === 'lesson' && state.tab !== opts.tab) {
-        state.tab = opts.tab;
-        renderPanel({});
+      if (opts.tab && state.view === 'lesson') {
+        const want = opts.tab === 'task' ? nextStepOf(lesson()) : state.taskStep;
+        if (state.tab !== opts.tab || state.taskStep !== want) {
+          state.tab = opts.tab;
+          state.taskStep = want;
+          renderPanel({});
+        }
       }
       if (!wasOpen) {
         M.anim(el.panel, [{ opacity: 0, transform: 'translateX(48px)' }, { opacity: 1, transform: 'none' }], { duration: 640 });
@@ -1598,7 +1981,9 @@ def _trace_run(code):
     const startBtn = $('[data-nav="start"]');
     if (state.view === 'start') startBtn.setAttribute('aria-current', 'page');
     else startBtn.removeAttribute('aria-current');
-    document.title = state.view === 'lesson' ? `${lesson().short} — ${t('siteName')}` : t('siteName');
+    const qb = $('[data-nav="quests"]');
+    if (state.view === 'quests') qb.setAttribute('aria-current', 'page'); else qb.removeAttribute('aria-current');
+    document.title = state.view === 'lesson' ? `${lesson().short} — ${t('siteName')}` : state.view === 'quests' ? `${t('questsTitle')} — ${t('siteName')}` : t('siteName');
     renderStage({ animate });
     renderPanel({ animate });
     renderProgress();
@@ -1619,15 +2004,22 @@ def _trace_run(code):
     }
     const parts = raw.split('/');
     const prev = state.lessonId;
-    if (parts[0] === 'lesson' && lessons().some((l) => l.id === parts[1])) {
+    const prevView = state.view;
+    if (parts[0] === 'quests') {
+      state.view = 'quests';
+      state.lessonId = null;
+      const tab = Q_TABS.includes(parts[1]) ? parts[1] : 'daily';
+      if (tab !== quest.tab) quest.quiz = null;
+      quest.tab = tab;
+    } else if (parts[0] === 'lesson' && lessons().some((l) => l.id === parts[1])) {
       state.view = 'lesson';
       state.lessonId = parts[1];
-      if (prev !== state.lessonId) state.tab = 'learn';
+      if (prev !== state.lessonId) { state.tab = 'learn'; state.taskStep = nextStepOf(lesson()); }
     } else {
       state.view = 'start';
       state.lessonId = null;
     }
-    const changed = prev !== state.lessonId;
+    const changed = prev !== state.lessonId || prevView !== state.view || state.view === 'quests';
     if (intro && state.revealed) {
       // replay requested while the site is already shown: hide it again and start over
       state.revealed = false;

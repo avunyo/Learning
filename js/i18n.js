@@ -558,3 +558,78 @@ Object.assign(window.UI.de, {
   hintsToastOn: 'Tipps an: Unter jeder Codezeile steht jetzt, was sie macht. Im Helfer gibt es den Knopf „Schrittweise“.',
   hintsToastOff: 'Tipps aus.',
 });
+
+Object.assign(window.UI.ru, {
+  taskStepOf: (i, n) => `Шаг ${i} из ${n}`,
+  stepSolved: 'Шаг готов!',
+  stepSolvedBefore: 'Этот шаг уже решён. Можно решить ещё раз.',
+  nextStep: (n) => `Дальше: шаг ${n}`,
+});
+Object.assign(window.UI.en, {
+  taskStepOf: (i, n) => `Step ${i} of ${n}`,
+  stepSolved: 'Step done!',
+  stepSolvedBefore: 'You already solved this step. Feel free to solve it again.',
+  nextStep: (n) => `Next: step ${n}`,
+});
+Object.assign(window.UI.de, {
+  taskStepOf: (i, n) => `Schritt ${i} von ${n}`,
+  stepSolved: 'Schritt geschafft!',
+  stepSolvedBefore: 'Diesen Schritt hast du schon gelöst. Du kannst ihn nochmal lösen.',
+  nextStep: (n) => `Weiter zu Schritt ${n}`,
+});
+
+/* ---- Quests ---- */
+Object.assign(window.UI.ru, {
+  navQuests: 'Квесты', questsKicker: 'Тренировка', questsTitle: 'Квесты',
+  qTabDaily: 'Квест дня', qTabChapters: 'Квесты глав', qTabProjects: 'Идеи проектов',
+  lvl: { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный' },
+  dailyIntro: 'Каждый день три новых задания: лёгкое, среднее и сложное.',
+  streak: (n) => `Серия дней: ${n}`,
+  newIn: (h, m) => `Новые квесты через ${h} ч ${m} мин`,
+  questRunTitle: 'Твоё решение', questSolved: 'Квест выполнен!',
+  allDaily: 'Все три квеста на сегодня готовы. Возвращайся завтра!',
+  chaptersIntro: 'По три вопроса к каждой главе. Проверь, всё ли понятно.',
+  chapterN: (n) => `Глава ${n}`, quizNew: 'ещё не пройдено',
+  quizQ: (i, n) => `Вопрос ${i} из ${n}`, quizRight: 'Верно!', quizWrong: 'Не совсем.',
+  quizNext: 'Дальше', quizResult: 'Результат',
+  quizAll: 'Глава пройдена, всё понятно!', quizSome: 'Неплохо. Загляни ещё раз в урок и попробуй снова.',
+  quizRetry: 'Ещё раз', quizBack: 'Все главы', quizToLesson: 'К уроку',
+  projectsIntro: 'Свой проект запоминается лучше любого урока. Выбери тот, что по силам.',
+  projectNeeds: 'Понадобится:', projectStart: 'Начать в песочнице',
+});
+Object.assign(window.UI.en, {
+  navQuests: 'Quests', questsKicker: 'Practice', questsTitle: 'Quests',
+  qTabDaily: 'Quest of the day', qTabChapters: 'Chapter quests', qTabProjects: 'Project ideas',
+  lvl: { easy: 'Easy', medium: 'Medium', hard: 'Hard' },
+  dailyIntro: 'Three new tasks every day: easy, medium and hard.',
+  streak: (n) => `Streak: ${n} ${n === 1 ? 'day' : 'days'}`,
+  newIn: (h, m) => `New quests in ${h} h ${m} min`,
+  questRunTitle: 'Your solution', questSolved: 'Quest complete!',
+  allDaily: 'All three quests are done for today. Come back tomorrow!',
+  chaptersIntro: 'Three questions per chapter. Check that everything makes sense.',
+  chapterN: (n) => `Chapter ${n}`, quizNew: 'not done yet',
+  quizQ: (i, n) => `Question ${i} of ${n}`, quizRight: 'Right!', quizWrong: 'Not quite.',
+  quizNext: 'Next', quizResult: 'Result',
+  quizAll: 'Chapter passed, you\'ve got it!', quizSome: 'Not bad. Have another look at the lesson and try again.',
+  quizRetry: 'Try again', quizBack: 'All chapters', quizToLesson: 'Open the lesson',
+  projectsIntro: 'Your own project sticks better than any lesson. Pick one that fits.',
+  projectNeeds: 'You need:', projectStart: 'Start in the sandbox',
+});
+Object.assign(window.UI.de, {
+  navQuests: 'Quests', questsKicker: 'Training', questsTitle: 'Quests',
+  qTabDaily: 'Quest des Tages', qTabChapters: 'Kapitel-Quests', qTabProjects: 'Projektideen',
+  lvl: { easy: 'Leicht', medium: 'Mittel', hard: 'Schwer' },
+  dailyIntro: 'Jeden Tag drei neue Aufgaben: leicht, mittel und schwer.',
+  streak: (n) => `Serie: ${n} ${n === 1 ? 'Tag' : 'Tage'}`,
+  newIn: (h, m) => `Neue Quests in ${h} Std. ${m} Min.`,
+  questRunTitle: 'Deine Lösung', questSolved: 'Quest geschafft!',
+  allDaily: 'Alle drei Quests für heute geschafft. Komm morgen wieder!',
+  chaptersIntro: 'Drei Fragen pro Kapitel. Prüf, ob alles sitzt.',
+  chapterN: (n) => `Kapitel ${n}`, quizNew: 'noch offen',
+  quizQ: (i, n) => `Frage ${i} von ${n}`, quizRight: 'Richtig!', quizWrong: 'Nicht ganz.',
+  quizNext: 'Weiter', quizResult: 'Ergebnis',
+  quizAll: 'Kapitel bestanden, alles verstanden!', quizSome: 'Nicht schlecht. Schau nochmal in die Lektion und versuch es erneut.',
+  quizRetry: 'Nochmal', quizBack: 'Alle Kapitel', quizToLesson: 'Zur Lektion',
+  projectsIntro: 'Ein eigenes Projekt bleibt besser hängen als jede Lektion. Such dir eins aus, das passt.',
+  projectNeeds: 'Du brauchst:', projectStart: 'In der Sandbox starten',
+});
