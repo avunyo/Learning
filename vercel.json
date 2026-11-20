@@ -1,20 +1,21 @@
 {
-  "rewrites": [
+  "routes": [
     {
-      "source": "/",
+      "src": "/",
       "has": [
         { "type": "header", "key": "user-agent", "value": ".*([Bb]ot|[Cc]rawler|[Ss]pider|[Pp]review|WhatsApp|facebookexternalhit|Facebot|Slack|Discord|Skype|Viber|Signal|vkShare|LinkedIn|Pinterest|[Ee]mbedly|Iframely|Mastodon|Teams).*" },
         { "type": "header", "key": "accept-language", "value": "de.*" }
       ],
-      "destination": "/de/"
+      "dest": "/de/index.html"
     },
     {
-      "source": "/",
+      "src": "/",
       "has": [
         { "type": "header", "key": "user-agent", "value": ".*([Bb]ot|[Cc]rawler|[Ss]pider|[Pp]review|WhatsApp|facebookexternalhit|Facebot|Slack|Discord|Skype|Viber|Signal|vkShare|LinkedIn|Pinterest|[Ee]mbedly|Iframely|Mastodon|Teams).*" },
         { "type": "header", "key": "accept-language", "value": "(ru|uk|be).*" }
       ],
-      "destination": "/ru/"
-    }
+      "dest": "/ru/index.html"
+    },
+    { "handle": "filesystem" }
   ]
 }
