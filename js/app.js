@@ -59,7 +59,11 @@
 
   /* ---------------- Task steps ---------------- */
   const solvedSteps = store.get('pps-steps', {});
-  const taskSteps = (l) => ((window.TASKS || {})[state.lang] || {})[l.id] || [l.task];
+  const taskSteps = (l) => {
+    const base = ((window.TASKS || {})[state.lang] || {})[l.id] || [l.task];
+    const ex = (((window.TASK_EXTRAS || {})[state.lang] || {}).lessons || {})[l.id] || [];
+    return base.map((st, i) => Object.assign({}, st, ex[i] || {}));
+  };
   const solvedOf = (l) => (state.done.has(l.id) ? taskSteps(l).length : Math.min(solvedSteps[l.id] || 0, taskSteps(l).length));
   const nextStepOf = (l) => Math.min(solvedOf(l), taskSteps(l).length - 1);
   const curTask = () => taskSteps(lesson())[state.taskStep] || taskSteps(lesson())[0];
@@ -568,10 +572,13 @@
   const PY_SETUP = String.raw`
 import builtins, js, sys, io, json, contextlib
 _queue = []
+_strict = [False]
 def _input(msg=""):
     print(msg, end="")
     if _queue:
         v = _queue.pop(0)
+    elif _strict[0]:
+        raise EOFError("no more input")
     else:
         v = js.prompt(str(msg) or js.PPS_INPUT_DEFAULT)
         v = "" if v is None else str(v)
@@ -652,33 +659,47 @@ def _trace_run(code):
     return pyPromise;
   }
 
-  async function runPython(code, inputs) {
-    const py = await loadPy();
-    const lines = [];
-    py.setStdout({ batched: (s) => lines.push(s) });
-    py.setStderr({ batched: (s) => lines.push(s) });
+  function feedInputs(py, inputs, strict) {
     const q = py.globals.get('_queue');
     q.clear();
     (inputs || []).forEach((v) => q.append(v));
     q.destroy();
+    py.runPython(`_strict[0] = ${strict ? 'True' : 'False'}`);
+  }
+
+  async function runPython(code, inputs, opts = {}) {
+    const py = await loadPy();
+    const lines = [];
+    py.setStdout({ batched: (s) => lines.push(s) });
+    py.setStderr({ batched: (s) => lines.push(s) });
+    feedInputs(py, inputs, opts.strict);
     const ns = py.toPy({ __name__: '__main__' });
     try {
       await py.runPythonAsync(code, { globals: ns });
+      if (opts.after) {
+        const mark = lines.length;
+        await py.runPythonAsync(opts.after, { globals: ns });
+        return { out: lines.slice(0, mark).join('\n'), after: lines.slice(mark).join('\n') };
+      }
       return { out: lines.join('\n') };
     } catch (err) {
       return { out: lines.join('\n'), error: String(err.message || err) };
     } finally {
       ns.destroy();
-      py.runPython('_queue.clear()');
+      py.runPython('_queue.clear()\n_strict[0] = False');
     }
   }
 
-  async function traceRun(code) {
+  async function traceRun(code, inputs) {
     const py = await loadPy();
+    feedInputs(py, inputs, !!inputs);
     const fn = py.globals.get('_trace_run');
-    const json = fn(code);
-    fn.destroy();
-    return JSON.parse(json);
+    try {
+      return JSON.parse(fn(code));
+    } finally {
+      fn.destroy();
+      py.runPython('_queue.clear()\n_strict[0] = False');
+    }
   }
 
   function explainError(msg) {
@@ -965,6 +986,238 @@ def _trace_run(code):
     };
   }
 
+  /* ---------------- Tests (LeetCode style) ---------------- */
+  const EXTRAS = () => (window.TASK_EXTRAS || {})[state.lang] || {};
+  const outLines = (s) => norm(s || '').split('\n');
+
+  function testDesc(tc) {
+    if (tc.example) return t('testExample') + (tc.inputs && tc.inputs.length ? ` · ${t('testInput', tc.inputs.join(', '))}` : '');
+    if (tc.call) return t('testCall', tc.call);
+    if (tc.replace) return t('testWith', tc.replace[1]);
+    if (tc.inputs) return t('testInput', tc.inputs.join(', '));
+    return '';
+  }
+
+  async function runOneTest(tc, code, task) {
+    let src = code;
+    if (tc.replace) {
+      const re = new RegExp(tc.replace[0], 'm');
+      if (!re.test(src)) return { ok: false, got: t('testNoVar') };
+      src = src.replace(re, tc.replace[1]);
+    }
+    const res = await runPython(src, tc.inputs || task.inputs || [], { after: tc.call ? `print(${tc.call})` : null, strict: true });
+    if (res.error) {
+      const e = explainError(res.error);
+      return { ok: false, got: /EOFError/.test(e.last) ? t('testNeedsInput') : e.last };
+    }
+    const out = tc.call ? res.after : res.out;
+    if (tc.last != null) {
+      const ls = outLines(out);
+      const last = (ls[ls.length - 1] || '').trim();
+      return { ok: last === tc.last, got: last || t('testEmpty') };
+    }
+    const got = norm(out);
+    return { ok: got === norm(tc.expect), got: got || t('testEmpty') };
+  }
+
+  const testRow = (i, tc, r) => `
+    <li class="tc ${r ? (r.ok ? 'ok' : 'no') : 'run'}" data-i="${i}">
+      <span class="tc-ic">${r ? icon(r.ok ? 'check' : 'close') : '<i class="tc-spin"></i>'}</span>
+      <span class="tc-main"><b>${esc(t('testN', i + 1))}</b><span class="tc-desc">${esc(testDesc(tc))}</span>
+      ${r && !r.ok && !tc.example ? `<span class="tc-diff"><span>${esc(t('testExpected'))}</span><code>${esc(tc.last != null ? tc.last : (norm(tc.expect) || t('testEmpty')))}</code><span>${esc(t('testGot'))}</span><code>${esc(r.got)}</code></span>` : ''}
+      ${!r ? `<span class="tc-desc">${esc(t('testRunning'))}</span>` : ''}</span>
+    </li>`;
+
+  /* runs the extra tests of a task and keeps a live list inside `host` */
+  async function runTests(task, code, exampleOk, host) {
+    const cases = [{ example: true, inputs: task.inputs }].concat(task.tests || []);
+    if (cases.length === 1) return { allOk: exampleOk, html: '' };
+    const results = [{ ok: exampleOk }];
+    const paint = () => {
+      const passed = results.filter((r) => r && r.ok).length;
+      return `<div class="tests">
+        <div class="tests-head"><b>${esc(t('testsTitle'))}</b><span>${results.length === cases.length ? esc(t('testsPassed', passed, cases.length)) : esc(t('testRunning'))}</span></div>
+        <ol class="tests-list">${cases.map((tc, i) => testRow(i, tc, results[i])).join('')}</ol></div>`;
+    };
+    host.innerHTML = paint();
+    $$('.tc', host).forEach((n, i) => M.anim(n, [{ opacity: 0, transform: 'translateX(-8px)' }, { opacity: 1, transform: 'none' }], { delay: i * 50, duration: 320 }));
+    for (let i = 1; i < cases.length; i++) {
+      results[i] = await runOneTest(cases[i], code, task);
+      const row = $(`.tc[data-i="${i}"]`, host);
+      if (row) {
+        row.outerHTML = testRow(i, cases[i], results[i]);
+        const fresh = $(`.tc[data-i="${i}"]`, host);
+        M.pop($('.tc-ic', fresh), 0, 420);
+        if (!results[i].ok) M.anim(fresh, [{ transform: 'translateX(0)' }, { transform: 'translateX(-4px)' }, { transform: 'translateX(4px)' }, { transform: 'none' }], { duration: 300 });
+      }
+    }
+    const head = $('.tests-head span', host);
+    if (head) head.textContent = t('testsPassed', results.filter((r) => r.ok).length, cases.length);
+    return { allOk: results.every((r) => r.ok), html: host.innerHTML };
+  }
+
+  /* ---------------- "Why??": a step-by-step explanation of the solution ---------------- */
+  const PUNCT = /^[()[\]{},:.]+$/;
+  function chipLabel(kind, text) {
+    if (kind === 'str') return t('chipText');
+    if (kind === 'num') return t('chipNum');
+    if (kind === 'com') return t('chipComment');
+    if (kind === 'def') return t('chipFuncName');
+    if (kind === 'bi') return t('chipFn');
+    if (kind === 'kw') {
+      if (/^(if|elif|else)$/.test(text)) return t('chipIf');
+      if (/^(for|while)$/.test(text)) return t('chipLoop');
+      if (text === 'def') return t('chipDef');
+      if (text === 'return') return t('chipReturn');
+      if (text === 'in') return t('chipIn');
+      if (/^(True|False)$/.test(text)) return t('chipBool');
+      return t('chipKw');
+    }
+    if (kind === 'op') {
+      if (text === '=' || text === '+=') return t('chipAssign');
+      if (/^(==|!=|>=|<=|>|<)$/.test(text)) return t('chipCompare');
+      if (text === '%') return t('chipRest');
+      if (/^(\+|-|\*|\/|\/\/|\*\*)$/.test(text)) return t('chipMath');
+      return '';
+    }
+    if (kind === 'name') return t('chipVar');
+    return '';
+  }
+  function chipsFor(line) {
+    const chips = [];
+    const indent = (line.match(/^ +/) || [''])[0];
+    if (indent) chips.push({ kind: 'ind', text: '⇥', label: t('chipIndent') });
+    const st = { afterDef: false };
+    line.trim().replace(TOKEN, (m, com, str, num, word, ws, op, at, whole) => {
+      let kind = null;
+      let text = m;
+      if (com) kind = 'com';
+      else if (str) kind = 'str';
+      else if (num) kind = 'num';
+      else if (word) {
+        if (st.afterDef) { kind = 'def'; st.afterDef = false; }
+        else if (KW.has(word)) { kind = 'kw'; st.afterDef = word === 'def'; }
+        else if (BI.has(word) || word === 'append') kind = 'bi';
+        else if (whole[at + m.length] === '(') kind = 'def';
+        else kind = 'name';
+      } else if (op) {
+        text = op.trim();
+        kind = PUNCT.test(text) ? 'punct' : 'op';
+      }
+      if (kind) chips.push({ kind, text, label: kind === 'punct' ? '' : chipLabel(kind, text) });
+      return m;
+    });
+    return chips;
+  }
+  const chipRow = (line, small) => `<div class="chips${small ? ' small' : ''}">${chipsFor(line).map((c) => `
+      <span class="chip-b" data-ck="${c.kind}"><code>${esc(c.text)}</code>${c.label ? `<small>${esc(c.label)}</small>` : ''}</span>`).join('')}</div>`;
+
+  function describeStep(s, next, line) {
+    const parts = [];
+    const vars = next ? next.vars : {};
+    Object.keys(vars).forEach((k) => {
+      const v = vars[k];
+      if (typeof v === 'object') return;
+      if (JSON.stringify(s.vars[k]) !== JSON.stringify(v)) parts.push(`<div class="why-var"><code class="wv-k">${esc(k)}</code><span class="wv-arrow">←</span><code class="wv-v">${esc(v)}</code><span class="wv-t">${esc(t('whyGets', k))}</span></div>`);
+    });
+    const newOut = next ? (next.out || '').slice((s.out || '').length) : '';
+    if (newOut.trim()) parts.push(`<div class="why-out"><span>${esc(t('whyPrints'))}</span><pre>${esc(newOut.replace(/\n$/, ''))}</pre></div>`);
+    if (!parts.length) {
+      const tl = line.trim();
+      let msg = t('whyNothing');
+      if (/^(if|elif|while)\b/.test(tl)) msg = next && next.line === s.line + 1 ? t('whyCondTrue') : t('whyCondFalse');
+      else if (/^else\b/.test(tl)) msg = t('whyCondTrue');
+      else if (/^for\b/.test(tl)) msg = t('whyLoop');
+      else if (/^def\b/.test(tl)) msg = t('whyDef');
+      else if (/^return\b/.test(tl)) msg = t('whyReturn');
+      parts.push(`<p class="why-note">${esc(msg)}</p>`);
+    }
+    return parts.join('');
+  }
+
+  async function openWhy(task, root) {
+    if (!task.solution) return;
+    root.hidden = false;
+    const code = task.solution;
+    const lines = code.split('\n');
+    root.innerHTML = `
+      <div class="why-head"><b>${esc(t('whyTitle'))}</b><button class="icon-btn why-close" type="button" aria-label="${esc(t('close'))}">${icon('close')}</button></div>
+      <div class="why-cards"></div>
+      <div class="why-nav"><span class="why-count"></span><button class="btn small why-all" type="button">${esc(t('whyAll'))}</button><button class="btn primary small why-next" type="button">${esc(t('whyNext'))}${icon('right')}</button></div>`;
+    M.anim(root, [{ opacity: 0, transform: 'translateY(-6px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 420, easing: M.SPRING });
+    const cards = $('.why-cards', root);
+    cards.innerHTML = `<p class="muted loading">${esc(t('whyLoading'))}</p>`;
+    let trace;
+    try { trace = await traceRun(code, task.inputs || []); } catch (e) { cards.innerHTML = `<p class="rn-err">${esc(t('loadFail'))}</p>`; return; }
+    const steps = trace.steps.filter((s) => !s.end);
+    const MAX = 12;
+    const shown = steps.slice(0, MAX);
+    const html = [];
+    html.push(`<article class="why-card"><span class="wc-n">${esc(t('whyBuild'))}</span>${lines.filter((l) => l.trim()).map((l) => chipRow(l)).join('')}</article>`);
+    shown.forEach((s, i) => {
+      const next = steps[i + 1] || trace.steps[trace.steps.length - 1];
+      const line = lines[s.line - 1] || '';
+      html.push(`<article class="why-card"><span class="wc-n">${esc(t('whyStep', i + 1, s.line))}</span>${chipRow(line, true)}${describeStep(s, next, line)}</article>`);
+    });
+    if (steps.length > MAX) html.push(`<article class="why-card more"><p class="why-note">${esc(t('whyMore', steps.length - MAX))}</p></article>`);
+    const final = trace.steps[trace.steps.length - 1];
+    html.push(`<article class="why-card result"><span class="wc-n">${icon('check')}${esc(t('whyResult'))}</span><pre>${esc((final.out || '').replace(/\n$/, '') || t('testEmpty'))}</pre><p class="why-note">${esc(t('whyResultText'))}</p></article>`);
+    cards.innerHTML = html.join('');
+    const all = $$('.why-card', cards);
+    all.forEach((c) => { c.hidden = true; });
+    let shownN = 0;
+    const count = $('.why-count', root);
+    const reveal = (c, d = 0) => {
+      c.hidden = false;
+      M.anim(c, [{ opacity: 0, transform: 'translateY(14px)' }, { opacity: 1, transform: 'none' }], { delay: d, duration: 460 });
+      $$('.chip-b', c).forEach((ch, j) => M.anim(ch, [{ opacity: 0, transform: 'translateY(8px) scale(.7)' }, { opacity: 1, transform: 'none' }], { delay: d + 120 + j * 55, duration: 420, easing: M.SPRING }));
+      $$('.wv-v', c).forEach((v) => M.anim(v, [{ opacity: 0, transform: 'translateX(26px) scale(1.4)' }, { opacity: 1, transform: 'none' }], { delay: d + 380, duration: 520, easing: M.SPRING }));
+      $$('.why-out pre, .result pre', c).forEach((p) => M.anim(p, [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0 0 0)' }], { delay: d + 300, duration: 600 }));
+      $$('.why-note', c).forEach((p) => M.anim(p, [{ opacity: 0 }, { opacity: 1 }], { delay: d + 250, duration: 400 }));
+      if (c.classList.contains('result')) { M.pop($('.wc-n .ic', c), d + 200, 520); }
+    };
+    const step = () => {
+      if (shownN >= all.length) return;
+      reveal(all[shownN]);
+      shownN++;
+      count.textContent = `${shownN} / ${all.length}`;
+      const done = shownN >= all.length;
+      $('.why-next', root).hidden = done;
+      $('.why-all', root).hidden = done;
+      all[shownN - 1].scrollIntoView({ block: 'nearest', behavior: M.reduced() ? 'auto' : 'smooth' });
+    };
+    $('.why-next', root).addEventListener('click', step);
+    $('.why-all', root).addEventListener('click', () => {
+      let d = 0;
+      while (shownN < all.length) { reveal(all[shownN], d); d += 140; shownN++; }
+      count.textContent = `${shownN} / ${all.length}`;
+      $('.why-next', root).hidden = true;
+      $('.why-all', root).hidden = true;
+    });
+    step();
+  }
+
+  /* opening "Tipp" makes the orange "Why??" pop out */
+  document.addEventListener('toggle', (e) => {
+    const d = e.target;
+    if (!(d instanceof HTMLDetailsElement) || !d.open) return;
+    const b = $('.why-btn', d);
+    if (b) M.anim(b, [{ opacity: 0, transform: 'scale(.4) rotate(-8deg)' }, { opacity: 1, transform: 'scale(1.12) rotate(3deg)', offset: .6 }, { opacity: 1, transform: 'none' }], { delay: 120, duration: 560, easing: 'ease-out' });
+  }, true);
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.why-btn');
+    if (b) {
+      const root = b.parentElement.querySelector('.why');
+      const task = b.closest('#questView') ? dailyTask(quest.level) : curTask();
+      if (!root.hidden) { root.hidden = true; return; }
+      openWhy(task, root);
+      return;
+    }
+    const c = e.target.closest('.why-close');
+    if (c) c.closest('.why').hidden = true;
+  });
+  const whyHtml = (task) => (task.solution ? `<button class="why-btn" type="button">${esc(t('why'))}</button><div class="why" hidden></div>` : '');
+
   /* ---------------- Panel ---------------- */
   const panelRunner = makeRunner(el.panelRunner, {
     title: () => t('tryIt'),
@@ -1188,7 +1441,7 @@ def _trace_run(code):
           <p class="step-of">${esc(t('taskStepOf', k + 1, steps.length))}</p>
           <p class="lead">${st.text}</p>
           <p class="task-how">${esc(t('taskHow'))}</p>
-          ${st.hint ? `<details ${state.hints ? 'open' : ''}><summary>${esc(t('hint'))}</summary><p>${st.hint}</p></details>` : ''}
+          ${st.hint ? `<details ${state.hints ? 'open' : ''}><summary>${esc(t('hint'))}</summary><p>${st.hint}</p>${whyHtml(st)}</details>` : ''}
           <div class="verdict ${k < solved ? 'ok' : ''}" id="verdict">${k < solved ? esc(done && k === steps.length - 1 ? t('alreadyDone') : t('stepSolvedBefore')) : ''}</div>
         </div>`;
       panelRunner.set(st.starter || '');
@@ -1251,26 +1504,28 @@ def _trace_run(code):
     }
   }
 
-  function checkTask(code, res) {
+  async function checkTask(code, res) {
     const l = lesson();
     const steps = taskSteps(l);
     const k = state.taskStep;
     const task = steps[k];
     const v = $('#verdict');
     if (!v) return;
-    let fail = null;
-    if (res.error) fail = esc(t('failError'));
-    else {
-      for (const m of task.must || []) { if (!new RegExp(m.re).test(code)) { fail = m.hint; break; } }
-      if (!fail) {
-        const out = norm(res.out || '');
-        if (task.expect != null && out !== norm(task.expect)) fail = `${esc(t('failOutput'))}<pre>${esc(task.expect)}</pre>`;
-        if (task.includes != null && !out.includes(task.includes)) fail = t('failIncludes', esc(task.includes));
-      }
+    let fail = evaluateTask(task, code, res);
+    let testsHtml = '';
+    if (task.tests && task.tests.length) {
+      const host = document.createElement('div');
+      v.className = 'verdict';
+      v.innerHTML = '';
+      v.append(host);
+      const r = await runTests(task, code, !fail, host);
+      if (!$('#verdict') || state.taskStep !== k || state.lessonId !== l.id) return;
+      testsHtml = r.html;
+      if (!fail && !r.allOk) fail = esc(t('testsFail'));
     }
     if (fail) {
       v.className = 'verdict no';
-      v.innerHTML = fail;
+      v.innerHTML = fail + testsHtml;
       M.anim(v, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { delay: 0, duration: 360 });
       return;
     }
@@ -1289,7 +1544,7 @@ def _trace_run(code):
     }
     if (k < steps.length - 1) {
       v.className = 'verdict ok';
-      v.innerHTML = `<span class="v-check">${icon('check')}</span><span>${esc(t('stepSolved'))}<br><button class="btn primary small step-next" type="button" data-step-go="${k + 1}">${esc(t('nextStep', k + 2))}${icon('right')}</button></span>`;
+      v.innerHTML = `<span class="v-check">${icon('check')}</span><span>${esc(t('stepSolved'))}<br><button class="btn primary small step-next" type="button" data-step-go="${k + 1}">${esc(t('nextStep', k + 2))}${icon('right')}</button></span>${testsHtml}`;
       M.anim(v, [{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: M.SPRING });
       M.pop($('.v-check', v), 120, 520);
       if (wasSolved <= k) burst($('.v-check', v));
@@ -1302,7 +1557,7 @@ def _trace_run(code):
     store.set('pps-done', Array.from(state.done));
     const next = lessons()[lessonIndex() + 1];
     v.className = 'verdict ok';
-    v.innerHTML = `<span class="v-check">${icon('check')}</span><span>${esc(first ? t('okFirst') : t('okAgain'))}<br>${next ? `<a class="link-btn" href="#/lesson/${next.id}">${esc(t('next', next.short))}</a>` : esc(t('lastLesson'))}</span>`;
+    v.innerHTML = `<span class="v-check">${icon('check')}</span><span>${esc(first ? t('okFirst') : t('okAgain'))}<br>${next ? `<a class="link-btn" href="#/lesson/${next.id}">${esc(t('next', next.short))}</a>` : esc(t('lastLesson'))}</span>${testsHtml}`;
     M.anim(v, [{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: M.SPRING });
     M.pop($('.v-check', v), 120, 520);
     burst($('.v-check', v));
@@ -1573,7 +1828,9 @@ def _trace_run(code):
   function dailyTask(lvl) {
     const pool = QD().daily[lvl];
     const shift = { easy: 0, medium: 2, hard: 4 }[lvl];
-    return pool[(dayNum() + shift) % pool.length];
+    const idx = (dayNum() + shift) % pool.length;
+    const ex = ((((window.TASK_EXTRAS || {})[state.lang] || {}).daily || {})[lvl] || [])[idx] || {};
+    return Object.assign({}, pool[idx], ex);
   }
   const doneToday = () => dailyLog[dayKey()] || [];
   function streak() {
@@ -1651,7 +1908,7 @@ def _trace_run(code):
       <div class="q-work q-anim" data-lvl="${quest.level}">
         <p class="q-work-lvl">${LEVEL_DOTS(quest.level)}${esc(t('lvl')[quest.level])}</p>
         <p class="lead">${task.text}</p>
-        ${task.hint ? `<details ${state.hints ? 'open' : ''}><summary>${esc(t('hint'))}</summary><p>${task.hint}</p></details>` : ''}
+        ${task.hint ? `<details ${state.hints ? 'open' : ''}><summary>${esc(t('hint'))}</summary><p>${task.hint}</p>${whyHtml(task)}</details>` : ''}
         <div class="verdict ${done.includes(quest.level) ? 'ok' : ''}" id="qVerdict">${done.includes(quest.level) ? esc(t('questSolved')) : ''}</div>
         <div class="q-runner"></div>
       </div>`;
@@ -1668,13 +1925,26 @@ def _trace_run(code):
     questRunner.setRun('check');
   }
 
-  function checkDaily(code, res) {
+  async function checkDaily(code, res) {
     const v = $('#qVerdict');
     if (!v) return;
-    const fail = evaluateTask(dailyTask(quest.level), code, res);
+    const task = dailyTask(quest.level);
+    const lvl = quest.level;
+    let fail = evaluateTask(task, code, res);
+    let testsHtml = '';
+    if (task.tests && task.tests.length) {
+      const host = document.createElement('div');
+      v.className = 'verdict';
+      v.innerHTML = '';
+      v.append(host);
+      const r = await runTests(task, code, !fail, host);
+      if (!$('#qVerdict') || quest.level !== lvl) return;
+      testsHtml = r.html;
+      if (!fail && !r.allOk) fail = esc(t('testsFail'));
+    }
     if (fail) {
       v.className = 'verdict no';
-      v.innerHTML = fail;
+      v.innerHTML = fail + testsHtml;
       M.anim(v, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 360 });
       return;
     }
@@ -1685,7 +1955,7 @@ def _trace_run(code):
     store.set('pps-daily', dailyLog);
     const all = LEVELS.every((l) => list.includes(l));
     v.className = 'verdict ok';
-    v.innerHTML = `<span class="v-check">${icon('check')}</span><span>${esc(t('questSolved'))}${all ? `<br>${esc(t('allDaily'))}` : ''}${!all ? `<br><button class="btn primary small q-next-level" type="button">${esc(t('quizNext'))}${icon('right')}</button>` : ''}</span>`;
+    v.innerHTML = `<span class="v-check">${icon('check')}</span><span>${esc(t('questSolved'))}${all ? `<br>${esc(t('allDaily'))}` : ''}${!all ? `<br><button class="btn primary small q-next-level" type="button">${esc(t('quizNext'))}${icon('right')}</button>` : ''}</span>${testsHtml}`;
     M.anim(v, [{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: M.SPRING });
     M.pop($('.v-check', v), 120, 520);
     if (first) burst($('.v-check', v));
