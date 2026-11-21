@@ -607,14 +607,22 @@ def _trace_run(code):
             else:
                 out[k] = _short(v)
         return out
+    depth = {"d": 0}
     def tracer(frame, event, arg):
         if frame.f_code.co_filename != "<user>":
             return None
-        if event == "line":
-            steps.append({"line": frame.f_lineno, "fn": frame.f_code.co_name, "vars": snapshot(frame), "out": buf.getvalue()})
+        inner = frame.f_code.co_name != "<module>"
+        if event == "call" and inner:
+            depth["d"] += 1
+        elif event == "line":
+            steps.append({"line": frame.f_lineno, "fn": frame.f_code.co_name, "vars": snapshot(frame), "out": buf.getvalue(), "depth": depth["d"]})
             if len(steps) >= 400:
                 limit["hit"] = True
                 raise _Stop()
+        elif event == "return" and inner:
+            depth["d"] -= 1
+            if steps:
+                steps[-1]["ret"] = _short(arg)
         return tracer
     err = None
     err_line = None
@@ -1057,82 +1065,151 @@ def _trace_run(code):
   }
 
   /* ---------------- "Why??": a step-by-step explanation of the solution ---------------- */
-  const PUNCT = /^[()[\]{},:.]+$/;
-  function chipLabel(kind, text) {
-    if (kind === 'str') return t('chipText');
-    if (kind === 'num') return t('chipNum');
-    if (kind === 'com') return t('chipComment');
-    if (kind === 'def') return t('chipFuncName');
-    if (kind === 'bi') return t('chipFn');
-    if (kind === 'kw') {
-      if (/^(if|elif|else)$/.test(text)) return t('chipIf');
-      if (/^(for|while)$/.test(text)) return t('chipLoop');
-      if (text === 'def') return t('chipDef');
-      if (text === 'return') return t('chipReturn');
-      if (text === 'in') return t('chipIn');
-      if (/^(True|False)$/.test(text)) return t('chipBool');
-      return t('chipKw');
-    }
-    if (kind === 'op') {
-      if (text === '=' || text === '+=') return t('chipAssign');
-      if (/^(==|!=|>=|<=|>|<)$/.test(text)) return t('chipCompare');
-      if (text === '%') return t('chipRest');
-      if (/^(\+|-|\*|\/|\/\/|\*\*)$/.test(text)) return t('chipMath');
-      return '';
-    }
-    if (kind === 'name') return t('chipVar');
-    return '';
-  }
-  function chipsFor(line) {
-    const chips = [];
-    const indent = (line.match(/^ +/) || [''])[0];
-    if (indent) chips.push({ kind: 'ind', text: '⇥', label: t('chipIndent') });
-    const st = { afterDef: false };
-    line.trim().replace(TOKEN, (m, com, str, num, word, ws, op, at, whole) => {
-      let kind = null;
-      let text = m;
-      if (com) kind = 'com';
-      else if (str) kind = 'str';
-      else if (num) kind = 'num';
-      else if (word) {
-        if (st.afterDef) { kind = 'def'; st.afterDef = false; }
-        else if (KW.has(word)) { kind = 'kw'; st.afterDef = word === 'def'; }
-        else if (BI.has(word) || word === 'append') kind = 'bi';
-        else if (whole[at + m.length] === '(') kind = 'def';
-        else kind = 'name';
-      } else if (op) {
-        text = op.trim();
-        kind = PUNCT.test(text) ? 'punct' : 'op';
-      }
-      if (kind) chips.push({ kind, text, label: kind === 'punct' ? '' : chipLabel(kind, text) });
+  /* ---------------- "Why??": Photomath-style walk through the solution ----------------
+     One scene per executed line. Each scene shows, piece by piece:
+       Code     the solution, with a pointer on the current line
+       Rechnung the line rewritten step by step: values put in, then worked out
+       Speicher variables as boxes; a new value drops into its box
+       Bildschirm what the program has printed so far
+     and one plain sentence saying what happened. */
+  const isAssign = (tl) => /^[A-Za-z_]\w*\s*(\+|-|\*|\/)?=(?!=)/.test(tl);
+  const valOf = (v) => (v && typeof v === 'object' ? null : v);
+
+  /* code → highlighted html, variables replaced by their values (marked) */
+  function substitute(src, vars, skip) {
+    let html = '';
+    let changed = false;
+    src.replace(TOKEN, (m, com, str, num, word, ws, op, at, whole) => {
+      if (word && Object.prototype.hasOwnProperty.call(vars, word) && valOf(vars[word]) != null
+        && whole[at + m.length] !== '(' && whole[at + m.length] !== '.' && whole[at - 1] !== '.' && word !== skip) {
+        html += `<mark class="sub">${esc(vars[word])}</mark>`;
+        changed = true;
+      } else html += hl(m);
       return m;
     });
-    return chips;
+    return { html, changed };
   }
-  const chipRow = (line, small) => `<div class="chips${small ? ' small' : ''}">${chipsFor(line).map((c) => `
-      <span class="chip-b" data-ck="${c.kind}"><code>${esc(c.text)}</code>${c.label ? `<small>${esc(c.label)}</small>` : ''}</span>`).join('')}</div>`;
+  const codeHtml = (src) => hl(src);
+  const markHtml = (text) => `<mark class="res">${esc(text)}</mark>`;
 
-  function describeStep(s, next, line) {
-    const parts = [];
-    const vars = next ? next.vars : {};
-    Object.keys(vars).forEach((k) => {
-      const v = vars[k];
-      if (typeof v === 'object') return;
-      if (JSON.stringify(s.vars[k]) !== JSON.stringify(v)) parts.push(`<div class="why-var"><code class="wv-k">${esc(k)}</code><span class="wv-arrow">←</span><code class="wv-v">${esc(v)}</code><span class="wv-t">${esc(t('whyGets', k))}</span></div>`);
+  function buildScenes(code, trace) {
+    const lines = code.split('\n');
+    const all = trace.steps;
+    const end = all[all.length - 1];
+    const steps = all.filter((s) => !s.end);
+    const depth = (s) => s.depth || 0;
+    const afterOf = (i) => {
+      for (let j = i + 1; j < steps.length; j++) if (depth(steps[j]) <= depth(steps[i])) return steps[j];
+      return end;
+    };
+    const scenes = [];
+    scenes.push({ line: 0, rows: [], caption: t('wIntro'), vars: {}, out: '', intro: true });
+    const pending = [];
+    const MAX = 22;
+
+    steps.forEach((s, i) => {
+      if (scenes.length > MAX) return;
+      const raw = lines[s.line - 1] || '';
+      const tl = raw.trim();
+      const next = steps[i + 1];
+      const after = afterOf(i);
+      const rows = [{ label: t('wRead'), html: codeHtml(tl) }];
+      let caption = t('wNothing');
+      let effVars = after.vars;
+      let effOut = after.out;
+
+      if (next && depth(next) > depth(s)) {
+        // the line calls one of our functions: show the call, go inside, come back later
+        const sub = substitute(tl, s.vars);
+        if (sub.changed) rows.push({ label: t('wSubst'), html: sub.html });
+        const call = (tl.match(/([A-Za-z_]\w*)\s*\(([^()]*)\)/g) || []).find((c) => {
+          const nm = c.split('(')[0].trim();
+          return s.vars[nm] && typeof s.vars[nm] === 'object';
+        }) || '';
+        caption = t('wCall', call.replace(/\s+/g, ''));
+        scenes.push({ line: s.line, rows, caption, vars: s.vars, out: s.out, call: true });
+        pending.push({ i, s, tl, call });
+        return;
+      }
+
+      if (/^def\b/.test(tl)) {
+        caption = t('wDef', (tl.match(/^def\s+(\w+)/) || [])[1] || '');
+      } else if (/^(if|elif|while)\b/.test(tl)) {
+        const cond = tl.replace(/^(if|elif|while)\s+/, '').replace(/:\s*$/, '');
+        const sub = substitute(cond, s.vars);
+        if (sub.changed) rows.push({ label: t('wSubst'), html: sub.html });
+        const truth = !!(next && depth(next) === depth(s) && next.line === s.line + 1);
+        rows.push({ label: t('wCheck'), html: markHtml(truth ? 'True' : 'False') });
+        caption = truth ? t('wTrue') : t('wFalse');
+        effVars = s.vars;
+        effOut = s.out;
+      } else if (/^else\b/.test(tl)) {
+        caption = t('wElse');
+      } else if (/^for\b/.test(tl)) {
+        const v = (tl.match(/^for\s+(\w+)/) || [])[1];
+        const nv = valOf(after.vars[v]);
+        const entered = next && next.line === s.line + 1 && depth(next) === depth(s);
+        if (entered && nv != null) {
+          rows.push({ label: t('wNextItem'), html: `${hl(v)} ${hl('=')} ${markHtml(nv)}` });
+          caption = t('wFor', v, nv);
+        } else caption = t('wForEnd');
+      } else if (/^return\b/.test(tl)) {
+        const sub = substitute(tl.replace(/^return\s*/, ''), s.vars);
+        if (sub.changed) rows.push({ label: t('wSubst'), html: `${hl('return')} ${sub.html}` });
+        if (s.ret != null) rows.push({ label: t('wCalc'), html: `${hl('return')} ${markHtml(s.ret)}` });
+        caption = t('wReturn', s.ret != null ? s.ret : '');
+        effVars = s.vars;
+        effOut = s.out;
+      } else {
+        // assignment, print or any other statement
+        const assign = isAssign(tl);
+        const target = assign ? tl.match(/^([A-Za-z_]\w*)/)[1] : null;
+        let sub;
+        if (assign) {
+          const parts = tl.match(/^([A-Za-z_]\w*\s*(?:\+|-|\*|\/)?=)(.*)$/);
+          const r = substitute(parts[2], s.vars);
+          sub = { html: hl(parts[1]) + r.html, changed: r.changed };
+        } else sub = substitute(tl, s.vars);
+        if (sub.changed) rows.push({ label: t('wSubst'), html: sub.html });
+        const newOut = (after.out || '').slice((s.out || '').length).replace(/\n$/, '');
+        if (assign) {
+          const nv = valOf(after.vars[target]);
+          const rhs = (tl.match(/=(?!=)\s*(.*)$/) || [])[1] || '';
+          const trivial = !sub.changed && /^=$/.test((tl.match(/^[A-Za-z_]\w*\s*(\S*=)/) || [])[1] || '') && rhs.trim() === String(nv);
+          if (nv != null && !trivial) rows.push({ label: t('wCalc'), html: `${hl(target)} ${hl('=')} ${markHtml(nv)}` });
+          caption = /input\s*\(/.test(tl) ? t('wInput', target, nv) : t('wAssign', target, nv);
+        } else if (newOut) {
+          rows.push({ label: t('wShow'), html: `<span class="row-screen">${esc(newOut)}</span>` });
+          caption = t('wPrint');
+        }
+      }
+      scenes.push({ line: s.line, rows, caption, vars: effVars, out: effOut });
+
+      // returning from our function(s): finish the line that called it
+      while (pending.length && (!next || depth(next) <= depth(pending[pending.length - 1].s))) {
+        const p = pending.pop();
+        const ret = s.ret != null ? s.ret : '';
+        const back = p.call ? p.tl.replace(p.call, `\u0000${ret}\u0001`) : p.tl;
+        const resumed = esc(back).replace(/\u0000([^\u0001]*)\u0001/, (_, r) => `</span>${markHtml(r)}<span>`);
+        const pAfter = afterOf(p.i);
+        const rows2 = [{ label: t('wBack'), html: `<span>${resumed}</span>` }];
+        const newOut = (pAfter.out || '').slice((s.out || p.s.out || '').length).replace(/\n$/, '');
+        let cap = t('wBackCap', ret);
+        if (isAssign(p.tl)) {
+          const target = p.tl.match(/^([A-Za-z_]\w*)/)[1];
+          const nv = valOf(pAfter.vars[target]);
+          if (nv != null) rows2.push({ label: t('wCalc'), html: `${hl(target)} ${hl('=')} ${markHtml(nv)}` });
+          cap = t('wAssign', target, nv);
+        } else if (newOut) {
+          rows2.push({ label: t('wShow'), html: `<span class="row-screen">${esc(newOut)}</span>` });
+          cap = t('wPrint');
+        }
+        scenes.push({ line: p.s.line, rows: rows2, caption: cap, vars: pAfter.vars, out: pAfter.out });
+      }
     });
-    const newOut = next ? (next.out || '').slice((s.out || '').length) : '';
-    if (newOut.trim()) parts.push(`<div class="why-out"><span>${esc(t('whyPrints'))}</span><pre>${esc(newOut.replace(/\n$/, ''))}</pre></div>`);
-    if (!parts.length) {
-      const tl = line.trim();
-      let msg = t('whyNothing');
-      if (/^(if|elif|while)\b/.test(tl)) msg = next && next.line === s.line + 1 ? t('whyCondTrue') : t('whyCondFalse');
-      else if (/^else\b/.test(tl)) msg = t('whyCondTrue');
-      else if (/^for\b/.test(tl)) msg = t('whyLoop');
-      else if (/^def\b/.test(tl)) msg = t('whyDef');
-      else if (/^return\b/.test(tl)) msg = t('whyReturn');
-      parts.push(`<p class="why-note">${esc(msg)}</p>`);
-    }
-    return parts.join('');
+    if (steps.length && scenes.length > MAX) scenes.push({ line: 0, rows: [], caption: t('wMore'), vars: end.vars, out: end.out, more: true });
+    scenes.push({ line: 0, rows: [], caption: t('whyResultText'), vars: end.vars, out: end.out, result: true });
+    return scenes;
   }
 
   async function openWhy(task, root) {
@@ -1142,59 +1219,168 @@ def _trace_run(code):
     const lines = code.split('\n');
     root.innerHTML = `
       <div class="why-head"><b>${esc(t('whyTitle'))}</b><button class="icon-btn why-close" type="button" aria-label="${esc(t('close'))}">${icon('close')}</button></div>
-      <div class="why-cards"></div>
-      <div class="why-nav"><span class="why-count"></span><button class="btn small why-all" type="button">${esc(t('whyAll'))}</button><button class="btn primary small why-next" type="button">${esc(t('whyNext'))}${icon('right')}</button></div>`;
+      <p class="muted loading">${esc(t('whyLoading'))}</p>`;
     M.anim(root, [{ opacity: 0, transform: 'translateY(-6px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 420, easing: M.SPRING });
-    const cards = $('.why-cards', root);
-    cards.innerHTML = `<p class="muted loading">${esc(t('whyLoading'))}</p>`;
     let trace;
-    try { trace = await traceRun(code, task.inputs || []); } catch (e) { cards.innerHTML = `<p class="rn-err">${esc(t('loadFail'))}</p>`; return; }
-    const steps = trace.steps.filter((s) => !s.end);
-    const MAX = 12;
-    const shown = steps.slice(0, MAX);
-    const html = [];
-    html.push(`<article class="why-card"><span class="wc-n">${esc(t('whyBuild'))}</span>${lines.filter((l) => l.trim()).map((l) => chipRow(l)).join('')}</article>`);
-    shown.forEach((s, i) => {
-      const next = steps[i + 1] || trace.steps[trace.steps.length - 1];
-      const line = lines[s.line - 1] || '';
-      html.push(`<article class="why-card"><span class="wc-n">${esc(t('whyStep', i + 1, s.line))}</span>${chipRow(line, true)}${describeStep(s, next, line)}</article>`);
+    try { trace = await traceRun(code, task.inputs || []); } catch (e) { root.querySelector('.loading').outerHTML = `<p class="rn-err">${esc(t('loadFail'))}</p>`; return; }
+    const scenes = buildScenes(code, trace);
+
+    root.innerHTML = `
+      <div class="why-head"><b>${esc(t('whyTitle'))}</b><span class="why-count"></span><button class="icon-btn why-close" type="button" aria-label="${esc(t('close'))}">${icon('close')}</button></div>
+      <div class="wz">
+        <section class="wz-code"><span class="wz-l">${esc(t('wCode'))}</span>
+          <ol>${lines.map((l, i) => `<li data-ln="${i + 1}"><span class="wz-ptr">▶</span><span class="wz-n">${i + 1}</span><code>${hl(l) || ' '}</code></li>`).join('')}</ol>
+        </section>
+        <section class="wz-calc"><span class="wz-l">${esc(t('wCalcTitle'))}</span><div class="wz-rows"></div></section>
+        <div class="wz-two">
+          <section class="wz-mem"><span class="wz-l">${esc(t('wMem'))}</span><div class="wz-boxes"></div></section>
+          <section class="wz-scr"><span class="wz-l">${esc(t('wScreen'))}</span><pre class="wz-out"></pre></section>
+        </div>
+        <p class="wz-cap" aria-live="polite"></p>
+      </div>
+      <div class="why-nav">
+        <button class="btn small wz-back" type="button">${icon('left')}${esc(t('wPrev'))}</button>
+        <button class="btn small wz-play" type="button" aria-pressed="false">${icon('play')}<span>${esc(t('wPlay'))}</span></button>
+        <button class="btn primary small wz-next" type="button">${esc(t('whyNext'))}${icon('right')}</button>
+      </div>`;
+
+    const $r = (s) => root.querySelector(s);
+    let si = 0;          // scene index
+    let ri = 0;          // rows revealed in the current scene
+    let shownVars = {};
+    let shownOut = '';
+    let timer = null;
+
+    function renderMem(vars, animate) {
+      const box = $r('.wz-boxes');
+      const names = Object.keys(vars);
+      if (!names.length) { box.innerHTML = `<span class="muted wz-empty">${esc(t('wMemEmpty'))}</span>`; shownVars = {}; return; }
+      box.innerHTML = names.map((k) => {
+        const v = vars[k];
+        const fn = v && typeof v === 'object';
+        return `<div class="wz-box${fn ? ' is-fn' : ''}" data-k="${esc(k)}"><span class="wz-k">${esc(k)}</span><span class="wz-v">${fn ? 'ƒ' : esc(v)}</span></div>`;
+      }).join('');
+      if (animate) {
+        names.forEach((k) => {
+          const el = box.querySelector(`[data-k="${CSS.escape(k)}"]`);
+          if (!(k in shownVars)) M.anim(el, [{ opacity: 0, transform: 'scale(.5)' }, { opacity: 1, transform: 'none' }], { duration: 480, easing: M.SPRING });
+          else if (JSON.stringify(shownVars[k]) !== JSON.stringify(vars[k])) {
+            el.classList.add('changed');
+            M.anim(el.querySelector('.wz-v'), [{ opacity: 0, transform: 'translateY(-22px) scale(1.4)' }, { opacity: 1, transform: 'none' }], { duration: 560, easing: M.SPRING });
+          }
+        });
+      }
+      shownVars = vars;
+    }
+    function renderOut(out, animate) {
+      const pre = $r('.wz-out');
+      const text = (out || '').replace(/\n$/, '');
+      if (animate && text.startsWith(shownOut) && text.length > shownOut.length) {
+        const add = text.slice(shownOut.length);
+        pre.innerHTML = `${esc(shownOut)}<span class="wz-new">${esc(add)}</span>`;
+        M.anim($r('.wz-new'), [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0 0 0)' }], { duration: Math.min(900, 200 + add.length * 40) });
+      } else pre.textContent = text;
+      if (!text) pre.innerHTML = `<span class="muted">${esc(t('testEmpty'))}</span>`;
+      shownOut = text;
+    }
+    function setCaption(text) {
+      const cap = $r('.wz-cap');
+      cap.innerHTML = text.split(' ').map((w) => `<span class="nw">${esc(w)}</span>`).join(' ');
+      $$('.nw', cap).forEach((w, i) => M.anim(w, [{ opacity: 0, filter: 'blur(4px)', transform: 'translateY(4px)' }, { opacity: 1, filter: 'blur(0)', transform: 'none' }], { delay: i * 45, duration: 380 }));
+    }
+    function addRow(row, animate) {
+      const wrap = $r('.wz-rows');
+      if (wrap.children.length) wrap.insertAdjacentHTML('beforeend', '<div class="wz-arrow">↓</div>');
+      wrap.insertAdjacentHTML('beforeend', `<div class="wz-row"><span class="wz-rl">${esc(row.label)}</span><code>${row.html}</code></div>`);
+      if (animate) {
+        const arrow = wrap.children.length > 1 ? wrap.children[wrap.children.length - 2] : null;
+        if (arrow) M.anim(arrow, [{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: 300 });
+        const el = wrap.lastElementChild;
+        M.anim(el, [{ opacity: 0, transform: 'translateY(10px) scale(.97)' }, { opacity: 1, transform: 'none' }], { delay: 80, duration: 460, easing: M.SPRING });
+        $$('mark', el).forEach((mk, j) => M.anim(mk, [{ transform: 'scale(1.6)', opacity: 0 }, { transform: 'none', opacity: 1 }], { delay: 260 + j * 90, duration: 520, easing: M.SPRING }));
+      }
+    }
+    function finishScene(animate) {
+      const sc = scenes[si];
+      renderMem(sc.vars, animate);
+      renderOut(sc.out, animate);
+      setCaption(sc.caption);
+      if (sc.result && animate) { M.anim($r('.wz-scr'), [{ boxShadow: '0 0 0 0 transparent' }, { boxShadow: '0 0 0 4px color-mix(in srgb, var(--str) 50%, transparent)' }, { boxShadow: '0 0 0 0 transparent' }], { duration: 1200 }); }
+    }
+    function enterScene(animate) {
+      const sc = scenes[si];
+      ri = 0;
+      $r('.wz-rows').innerHTML = '';
+      $$('.wz-code li', root).forEach((li) => li.classList.toggle('cur', Number(li.dataset.ln) === sc.line));
+      const cur = $r('.wz-code li.cur');
+      if (cur && animate) M.anim(cur, [{ backgroundColor: 'color-mix(in srgb, var(--kw) 40%, transparent)' }, { backgroundColor: 'color-mix(in srgb, var(--kw) 14%, transparent)' }], { duration: 600 });
+      root.classList.toggle('is-result', !!sc.result);
+      $r('.wz-calc').hidden = !sc.rows.length;
+      if (sc.rows.length) { addRow(sc.rows[0], animate); ri = 1; }
+      if (ri >= sc.rows.length) finishScene(animate);
+      else $r('.wz-cap').textContent = '';
+      updateNav();
+    }
+    function forward() {
+      const sc = scenes[si];
+      if (ri < sc.rows.length) {
+        addRow(sc.rows[ri], true);
+        ri++;
+        if (ri >= sc.rows.length) finishScene(true);
+      } else if (si < scenes.length - 1) {
+        si++;
+        enterScene(true);
+      }
+      updateNav();
+    }
+    function backward() {
+      if (si === 0) return;
+      si--;
+      // show the previous scene complete, without animation
+      const sc = scenes[si];
+      $r('.wz-rows').innerHTML = '';
+      $$('.wz-code li', root).forEach((li) => li.classList.toggle('cur', Number(li.dataset.ln) === sc.line));
+      $r('.wz-calc').hidden = !sc.rows.length;
+      sc.rows.forEach((row) => addRow(row, false));
+      ri = sc.rows.length;
+      root.classList.toggle('is-result', !!sc.result);
+      shownVars = sc.vars;
+      shownOut = (sc.out || '').replace(/\n$/, '');
+      finishScene(false);
+      updateNav();
+    }
+    const atEnd = () => si === scenes.length - 1 && ri >= scenes[si].rows.length;
+    function updateNav() {
+      $r('.why-count').textContent = t('wSceneOf', si + 1, scenes.length);
+      $r('.wz-back').disabled = si === 0;
+      $r('.wz-next').disabled = atEnd();
+      if (atEnd()) stopPlay();
+    }
+    function stopPlay() {
+      clearInterval(timer);
+      timer = null;
+      const b = $r('.wz-play');
+      if (b) { b.setAttribute('aria-pressed', 'false'); b.querySelector('span:last-child').textContent = t('wPlay'); }
+    }
+    $r('.wz-next').addEventListener('click', () => { stopPlay(); forward(); });
+    $r('.wz-back').addEventListener('click', () => { stopPlay(); backward(); });
+    $r('.wz-play').addEventListener('click', (e) => {
+      if (timer) { stopPlay(); return; }
+      e.currentTarget.setAttribute('aria-pressed', 'true');
+      e.currentTarget.querySelector('span:last-child').textContent = t('wPause');
+      forward();
+      timer = setInterval(() => { if (!root.isConnected || root.hidden) { stopPlay(); return; } forward(); }, 1500);
     });
-    if (steps.length > MAX) html.push(`<article class="why-card more"><p class="why-note">${esc(t('whyMore', steps.length - MAX))}</p></article>`);
-    const final = trace.steps[trace.steps.length - 1];
-    html.push(`<article class="why-card result"><span class="wc-n">${icon('check')}${esc(t('whyResult'))}</span><pre>${esc((final.out || '').replace(/\n$/, '') || t('testEmpty'))}</pre><p class="why-note">${esc(t('whyResultText'))}</p></article>`);
-    cards.innerHTML = html.join('');
-    const all = $$('.why-card', cards);
-    all.forEach((c) => { c.hidden = true; });
-    let shownN = 0;
-    const count = $('.why-count', root);
-    const reveal = (c, d = 0) => {
-      c.hidden = false;
-      M.anim(c, [{ opacity: 0, transform: 'translateY(14px)' }, { opacity: 1, transform: 'none' }], { delay: d, duration: 460 });
-      $$('.chip-b', c).forEach((ch, j) => M.anim(ch, [{ opacity: 0, transform: 'translateY(8px) scale(.7)' }, { opacity: 1, transform: 'none' }], { delay: d + 120 + j * 55, duration: 420, easing: M.SPRING }));
-      $$('.wv-v', c).forEach((v) => M.anim(v, [{ opacity: 0, transform: 'translateX(26px) scale(1.4)' }, { opacity: 1, transform: 'none' }], { delay: d + 380, duration: 520, easing: M.SPRING }));
-      $$('.why-out pre, .result pre', c).forEach((p) => M.anim(p, [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0 0 0)' }], { delay: d + 300, duration: 600 }));
-      $$('.why-note', c).forEach((p) => M.anim(p, [{ opacity: 0 }, { opacity: 1 }], { delay: d + 250, duration: 400 }));
-      if (c.classList.contains('result')) { M.pop($('.wc-n .ic', c), d + 200, 520); }
-    };
-    const step = () => {
-      if (shownN >= all.length) return;
-      reveal(all[shownN]);
-      shownN++;
-      count.textContent = `${shownN} / ${all.length}`;
-      const done = shownN >= all.length;
-      $('.why-next', root).hidden = done;
-      $('.why-all', root).hidden = done;
-      all[shownN - 1].scrollIntoView({ block: 'nearest', behavior: M.reduced() ? 'auto' : 'smooth' });
-    };
-    $('.why-next', root).addEventListener('click', step);
-    $('.why-all', root).addEventListener('click', () => {
-      let d = 0;
-      while (shownN < all.length) { reveal(all[shownN], d); d += 140; shownN++; }
-      count.textContent = `${shownN} / ${all.length}`;
-      $('.why-next', root).hidden = true;
-      $('.why-all', root).hidden = true;
+    root.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); stopPlay(); forward(); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); stopPlay(); backward(); }
     });
-    step();
+
+    renderMem({}, false);
+    renderOut('', false);
+    enterScene(true);
+    $$('.wz > *', root).forEach((n, i) => M.anim(n, [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { delay: i * 70, duration: 420 }));
+    $r('.wz-next').focus({ preventScroll: true });
   }
 
   /* opening "Tipp" makes the orange "Why??" pop out */
