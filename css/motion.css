@@ -1169,3 +1169,48 @@ a.tile:hover { background: var(--surface-2); transform: translateY(-2px); }
 .wz { grid-template-columns: minmax(0, 1fr); }
 .why, .wz-ask, .wz-ans, .task-box details { min-width: 0; max-width: 100%; }
 .wz-code ol { overflow-x: auto; }
+
+/* ============ Smart play: fast run through the remaining loop rounds ============ */
+.wz-code li.loop { background: color-mix(in srgb, var(--num) 12%, transparent); box-shadow: inset 3px 0 0 var(--num); }
+.ff { display: grid; gap: 8px; width: 100%; }
+.ff-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.ff-head b { font-size: 14px; color: var(--num); }
+.ff-n { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ff-bar { height: 5px; border-radius: 5px; background: var(--surface-2); overflow: hidden; }
+.ff-bar span { display: block; width: 0; height: 100%; background: var(--num); border-radius: inherit; transition: width .45s cubic-bezier(.16, 1, .3, 1); }
+.ff-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 210px; overflow-y: auto; scroll-behavior: smooth; }
+.ff-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 6px; padding: 5px 8px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font-size: 13.5px; }
+.ff-row:last-child { border-color: var(--num); }
+.ff-r { min-width: 62px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.ff-lv { padding: 1px 7px; border-radius: 6px; background: color-mix(in srgb, var(--num) 16%, var(--surface)); }
+.ff-ch { padding: 1px 7px; border-radius: 6px; background: color-mix(in srgb, var(--str) 14%, var(--surface)); }
+.ff-ch b { color: var(--ink); }
+.ff-out { padding: 1px 7px; border-radius: 6px; background: #1E242B; color: #F2F4F7; }
+.ff-arrow { color: var(--muted); font-size: 12px; }
+
+/* ============ "Why??" from scratch: solution · output · why ============ */
+.why { display: grid; gap: 14px; }
+.w3 { display: grid; gap: 8px; min-width: 0; }
+.w3 h4 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14.5px; font-weight: 600; }
+.w3-num { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--kw); color: #fff; font: 700 12px/1 var(--font-body); }
+.w3-lines, .w3-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.w3-lines li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 2px 8px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); }
+.w3-n { grid-row: span 2; font: 500 12px/1.9 var(--font-code); color: var(--muted); text-align: right; }
+.w3-code { font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; font-variant-ligatures: none; }
+.w3-code .t-kw { color: var(--kw); } .w3-code .t-str { color: var(--str); } .w3-code .t-bi { color: var(--bi); }
+.w3-code .t-def { color: var(--def); } .w3-code .t-num { color: var(--num); } .w3-code .t-com { color: var(--com); } .w3-code .t-op { color: var(--muted); }
+.w3-say { font-size: 14px; line-height: 1.5; color: var(--ink); }
+.w3-lines .w3-say { color: var(--muted); }
+.w3-term { margin: 0; padding: 10px 12px; border-radius: 10px; background: #1E242B; color: #F2F4F7; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.w3-ol { display: block; }
+.w3-card { display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--kw); }
+.w3-out { margin: 0; padding: 6px 10px; border-radius: 8px; background: #1E242B; color: #F2F4F7; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; justify-self: start; max-width: 100%; max-height: 9em; overflow: auto; }
+.w3-from { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13.5px; }
+.w3-from code { padding: 2px 8px; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; font-variant-ligatures: none; }
+.w3-from .t-kw { color: var(--kw); } .w3-from .t-str { color: var(--str); } .w3-from .t-bi { color: var(--bi); }
+.w3-from .t-num { color: var(--num); } .w3-from .t-op { color: var(--muted); }
+.w3-tag { padding: 2px 8px; border-radius: 99px; background: color-mix(in srgb, var(--kw) 16%, var(--surface)); color: var(--kw); font-size: 12px; font-weight: 600; }
+.w3-arr { color: var(--kw); }
+
+.prose .w3-code { padding: 0; border: 0; background: none; font-size: 14px; }
+.prose .w3-from code { font-size: 13px; }

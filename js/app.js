@@ -1065,466 +1065,141 @@ def _trace_run(code):
   }
 
   /* ---------------- "Why??": a step-by-step explanation of the solution ---------------- */
-  /* ---------------- "Why??": Photomath-style walk through the solution ----------------
-     One scene per executed line. Each scene shows, piece by piece:
-       Code     the solution, with a pointer on the current line
-       Rechnung the line rewritten step by step: values put in, then worked out
-       Speicher variables as boxes; a new value drops into its box
-       Bildschirm what the program has printed so far
-     and one plain sentence saying what happened. */
-  const isAssign = (tl) => /^[A-Za-z_]\w*\s*(\+|-|\*|\/)?=(?!=)/.test(tl);
+  /* ---------------- "Why??": the solution, what it prints, and why ----------------
+     Three plain parts, read top to bottom:
+       1. Die Lösung        every line of the solution with one sentence about what it does
+       2. Das kommt heraus  the output, like in a terminal
+       3. Warum genau das?  for every piece of output: which line printed it, with which values */
   const valOf = (v) => (v && typeof v === 'object' ? null : v);
-
-  /* code → highlighted html, variables replaced by their values (marked) */
-  function substitute(src, vars, skip) {
-    let html = '';
-    let changed = false;
-    src.replace(TOKEN, (m, com, str, num, word, ws, op, at, whole) => {
-      if (word && Object.prototype.hasOwnProperty.call(vars, word) && valOf(vars[word]) != null
-        && whole[at + m.length] !== '(' && whole[at + m.length] !== '.' && whole[at - 1] !== '.' && word !== skip) {
-        html += `<mark class="sub">${esc(vars[word])}</mark>`;
-        changed = true;
-      } else html += hl(m);
-      return m;
-    });
-    return { html, changed };
-  }
-  const codeHtml = (src) => hl(src);
-  const markHtml = (text) => `<mark class="res">${esc(text)}</mark>`;
-
-  function buildScenes(code, trace) {
-    const lines = code.split('\n');
-    const all = trace.steps;
-    const end = all[all.length - 1];
-    const steps = all.filter((s) => !s.end);
-    const depth = (s) => s.depth || 0;
-    const afterOf = (i) => {
-      for (let j = i + 1; j < steps.length; j++) if (depth(steps[j]) <= depth(steps[i])) return steps[j];
-      return end;
-    };
-    const scenes = [];
-    scenes.push({ line: 0, rows: [], caption: t('wIntro'), vars: {}, out: '', intro: true });
-    const pending = [];
-    const MAX = 22;
-
-    steps.forEach((s, i) => {
-      if (scenes.length > MAX) return;
-      const raw = lines[s.line - 1] || '';
-      const tl = raw.trim();
-      const next = steps[i + 1];
-      const after = afterOf(i);
-      const rows = [{ label: t('wRead'), html: codeHtml(tl) }];
-      let caption = t('wNothing');
-      let effVars = after.vars;
-      let effOut = after.out;
-
-      if (next && depth(next) > depth(s)) {
-        // the line calls one of our functions: show the call, go inside, come back later
-        const sub = substitute(tl, s.vars);
-        if (sub.changed) rows.push({ label: t('wSubst'), html: sub.html });
-        const call = (tl.match(/([A-Za-z_]\w*)\s*\(([^()]*)\)/g) || []).find((c) => {
-          const nm = c.split('(')[0].trim();
-          return s.vars[nm] && typeof s.vars[nm] === 'object';
-        }) || '';
-        caption = t('wCall', call.replace(/\s+/g, ''));
-        scenes.push({ line: s.line, rows, caption, vars: s.vars, out: s.out, call: true });
-        pending.push({ i, s, tl, call });
-        return;
-      }
-
-      if (/^def\b/.test(tl)) {
-        caption = t('wDef', (tl.match(/^def\s+(\w+)/) || [])[1] || '');
-      } else if (/^(if|elif|while)\b/.test(tl)) {
-        const cond = tl.replace(/^(if|elif|while)\s+/, '').replace(/:\s*$/, '');
-        const sub = substitute(cond, s.vars);
-        if (sub.changed) rows.push({ label: t('wSubst'), html: sub.html });
-        const truth = !!(next && depth(next) === depth(s) && next.line === s.line + 1);
-        rows.push({ label: t('wCheck'), html: markHtml(truth ? 'True' : 'False') });
-        caption = truth ? t('wTrue') : t('wFalse');
-        effVars = s.vars;
-        effOut = s.out;
-      } else if (/^else\b/.test(tl)) {
-        caption = t('wElse');
-      } else if (/^for\b/.test(tl)) {
-        const v = (tl.match(/^for\s+(\w+)/) || [])[1];
-        const nv = valOf(after.vars[v]);
-        const entered = next && next.line === s.line + 1 && depth(next) === depth(s);
-        if (entered && nv != null) {
-          rows.push({ label: t('wNextItem'), html: `${hl(v)} ${hl('=')} ${markHtml(nv)}` });
-          caption = t('wFor', v, nv);
-        } else caption = t('wForEnd');
-      } else if (/^return\b/.test(tl)) {
-        const sub = substitute(tl.replace(/^return\s*/, ''), s.vars);
-        if (sub.changed) rows.push({ label: t('wSubst'), html: `${hl('return')} ${sub.html}` });
-        if (s.ret != null) rows.push({ label: t('wCalc'), html: `${hl('return')} ${markHtml(s.ret)}` });
-        caption = t('wReturn', s.ret != null ? s.ret : '');
-        effVars = s.vars;
-        effOut = s.out;
-      } else {
-        // assignment, print or any other statement
-        const assign = isAssign(tl);
-        const target = assign ? tl.match(/^([A-Za-z_]\w*)/)[1] : null;
-        let sub;
-        if (assign) {
-          const parts = tl.match(/^([A-Za-z_]\w*\s*(?:\+|-|\*|\/)?=)(.*)$/);
-          const r = substitute(parts[2], s.vars);
-          sub = { html: hl(parts[1]) + r.html, changed: r.changed };
-        } else sub = substitute(tl, s.vars);
-        if (sub.changed) rows.push({ label: t('wSubst'), html: sub.html });
-        const newOut = (after.out || '').slice((s.out || '').length).replace(/\n$/, '');
-        if (assign) {
-          const nv = valOf(after.vars[target]);
-          const rhs = (tl.match(/=(?!=)\s*(.*)$/) || [])[1] || '';
-          const trivial = !sub.changed && /^=$/.test((tl.match(/^[A-Za-z_]\w*\s*(\S*=)/) || [])[1] || '') && rhs.trim() === String(nv);
-          if (nv != null && !trivial) rows.push({ label: t('wCalc'), html: `${hl(target)} ${hl('=')} ${markHtml(nv)}` });
-          caption = /input\s*\(/.test(tl) ? t('wInput', target, nv) : t('wAssign', target, nv);
-        } else if (newOut) {
-          rows.push({ label: t('wShow'), html: `<span class="row-screen">${esc(newOut)}</span>` });
-          caption = t('wPrint');
-        }
-      }
-      scenes.push({ line: s.line, rows, caption, vars: effVars, out: effOut });
-
-      // returning from our function(s): finish the line that called it
-      while (pending.length && (!next || depth(next) <= depth(pending[pending.length - 1].s))) {
-        const p = pending.pop();
-        const ret = s.ret != null ? s.ret : '';
-        const back = p.call ? p.tl.replace(p.call, `\u0000${ret}\u0001`) : p.tl;
-        const resumed = esc(back).replace(/\u0000([^\u0001]*)\u0001/, (_, r) => `</span>${markHtml(r)}<span>`);
-        const pAfter = afterOf(p.i);
-        const rows2 = [{ label: t('wBack'), html: `<span>${resumed}</span>` }];
-        const newOut = (pAfter.out || '').slice((s.out || p.s.out || '').length).replace(/\n$/, '');
-        let cap = t('wBackCap', ret);
-        if (isAssign(p.tl)) {
-          const target = p.tl.match(/^([A-Za-z_]\w*)/)[1];
-          const nv = valOf(pAfter.vars[target]);
-          if (nv != null) rows2.push({ label: t('wCalc'), html: `${hl(target)} ${hl('=')} ${markHtml(nv)}` });
-          cap = t('wAssign', target, nv);
-        } else if (newOut) {
-          rows2.push({ label: t('wShow'), html: `<span class="row-screen">${esc(newOut)}</span>` });
-          cap = t('wPrint');
-        }
-        scenes.push({ line: p.s.line, rows: rows2, caption: cap, vars: pAfter.vars, out: pAfter.out });
-      }
-    });
-    if (steps.length && scenes.length > MAX) scenes.push({ line: 0, rows: [], caption: t('wMore'), vars: end.vars, out: end.out, more: true });
-    scenes.push({ line: 0, rows: [], caption: t('whyResultText'), vars: end.vars, out: end.out, result: true });
-    return scenes;
-  }
-
-  /* ---------------- Asking about any piece of the solution ----------------
-     Every token in the Why?? code is a button. Tapping it (or one of the suggested
-     questions under the scene) answers a question about exactly that piece, using
-     the real values Python had while running the solution. */
-  const TOK_CLASS = { com: 't-com', str: 't-str', num: 't-num', kw: 't-kw', bi: 't-bi', def: 't-def', op: 't-op', name: '' };
-  function tokensOf(line) {
-    const toks = [];
-    const st = { afterDef: false };
-    line.replace(TOKEN, (m, com, str, num, word, ws, op, at) => {
-      let kind = 'op';
-      if (com) kind = 'com';
-      else if (str) kind = 'str';
-      else if (num) kind = 'num';
-      else if (ws) kind = 'ws';
-      else if (word) {
-        if (st.afterDef) { kind = 'def'; st.afterDef = false; }
-        else if (KW.has(word)) { kind = 'kw'; st.afterDef = word === 'def'; }
-        else if (BI.has(word)) kind = 'bi';
-        else kind = 'name';
-      }
-      toks.push({ text: m, kind, at });
-      return m;
-    });
-    return toks;
-  }
-  function askLineHtml(line, ln) {
-    if (!line) return '';
-    return tokensOf(line).map((tk, i) => {
-      if (tk.kind === 'ws') {
-        return i === 0 && tk.text.length >= 2
-          ? `<span class="qt qt-ind" data-ln="${ln}" data-ti="${i}" tabindex="0" role="button">${tk.text}</span>`
-          : tk.text;
-      }
-      return `<span class="qt ${TOK_CLASS[tk.kind] || ''}" data-ln="${ln}" data-ti="${i}" tabindex="0" role="button">${esc(tk.text)}</span>`;
-    }).join('');
-  }
-
-  /* the call a position sits in, e.g. "range" for the 11 in range(1, 11) */
-  function enclosingCall(line, at) {
-    let depth = 0;
-    for (let i = at - 1; i >= 0; i--) {
-      const ch = line[i];
-      if (ch === ')') depth++;
-      else if (ch === '(') {
-        if (depth === 0) {
-          const m = line.slice(0, i).match(/([A-Za-z_]\w*)\s*$/);
-          return m ? { name: m[1], open: i } : null;
-        }
-        depth--;
-      }
-    }
-    return null;
-  }
-  function rangeInfo(line, vars) {
-    const m = line.match(/range\s*\(([^()]*)\)/);
+  function rangeVals(src, vars) {
+    const m = src.match(/range\s*\(([^()]*)\)/);
     if (!m) return null;
     const args = m[1].split(',').map((a) => a.trim()).filter(Boolean);
     const num = (a) => (/^-?\d+$/.test(a) ? Number(a) : (vars && /^-?\d+$/.test(String(vars[a])) ? Number(vars[a]) : null));
-    const nums = args.map(num);
-    if (nums.some((n) => n == null)) return { text: m[0], args };
-    let [start, stop, step] = nums.length === 1 ? [0, nums[0], 1] : [nums[0], nums[1], nums[2] || 1];
-    const vals = [];
-    for (let v = start; step > 0 ? v < stop : v > stop; v += step) { vals.push(v); if (vals.length > 40) break; }
-    return { text: m[0], args, start, stop, step, vals, one: nums.length === 1 };
-  }
-  /* every value a variable had while the solution ran, without repeats in a row */
-  function history(trace, name) {
+    const n = args.map(num);
+    if (!n.length || n.some((x) => x == null)) return null;
+    const [a, b, s] = n.length === 1 ? [0, n[0], 1] : [n[0], n[1], n[2] || 1];
     const out = [];
-    trace.steps.forEach((s) => {
-      const v = s.vars && s.vars[name];
-      if (v == null || typeof v === 'object') return;
-      if (out[out.length - 1] !== v) out.push(v);
-    });
+    for (let v = a; s > 0 ? v < b : v > b; v += s) { out.push(v); if (out.length > 50) break; }
     return out;
   }
-  const seqHtml = (vals, cur) => {
-    const shown = vals.slice(0, 14);
-    return `<div class="qa-seq">${shown.map((v, i) => `${i ? '<span class="qa-arr">→</span>' : ''}<span class="qa-v${String(v) === String(cur) ? ' cur' : ''}">${esc(v)}</span>`).join('')}${vals.length > 14 ? '<span class="qa-arr">…</span>' : ''}</div>`;
-  };
-  const CMP = ['>=', '<=', '==', '!=', '>', '<'];
-  function cmpEval(a, op, b) {
-    const x = Number(a);
-    const y = Number(b);
-    if (Number.isNaN(x) || Number.isNaN(y)) return null;
-    const r = { '>': x > y, '<': x < y, '>=': x >= y, '<=': x <= y, '==': x === y, '!=': x !== y }[op];
-    return r ? 'True' : 'False';
-  }
-
-  /* range(2, 11, 2) taken apart: three labelled slots */
-  function rangeDecoder(r, hi) {
-    const slot = (role, v, implicit) => `<span class="rg-s${hi === role ? ' hi' : ''}${implicit ? ' implicit' : ''}"><code>${esc(v)}</code><small>${esc(t('l_' + role))}</small></span>`;
-    const parts = r.one
-      ? [slot('start', 0, true), slot('stop', r.stop), slot('step', 1, true)]
-      : [slot('start', r.start), slot('stop', r.stop), slot('step', r.step, r.args.length < 3)];
-    return `<div class="rg"><code class="rg-fn">range(</code>${parts.join('<code class="rg-c">,</code>')}<code class="rg-fn">)</code></div>`;
-  }
-  /* a number line: chosen numbers are dots, the stop is crossed out, the current one says "now" */
-  function numberLine(r, cur) {
-    const lo = Math.min(r.start, r.stop);
-    const hiN = Math.max(r.start, r.stop);
-    const all = hiN - lo <= 16;
-    const nums = all ? Array.from({ length: hiN - lo + 1 }, (_, i) => lo + i) : r.vals.concat([r.stop]);
-    const inSet = new Set(r.vals);
-    return `<div class="nl">${nums.map((v) => {
-      const isCur = String(v) === String(cur);
-      if (v === r.stop) return `<span class="nl-d stop"><b>${v}</b><small>${esc(t('l_notIn'))}</small></span>`;
-      if (inSet.has(v)) return `<span class="nl-d in${isCur ? ' cur' : ''}"><b>${v}</b>${isCur ? `<small>${esc(t('l_now'))}</small>` : ''}</span>`;
-      return `<span class="nl-d off"><b>${v}</b></span>`;
-    }).join('')}</div>`;
-  }
-  /* how we got to the current value: 2 →+2→ 4 →+2→ 6 */
-  function buildUp(vals, upto, stepLabel) {
-    const idx = upto == null ? Math.min(vals.length, 4) - 1 : vals.findIndex((v) => String(v) === String(upto));
-    if (idx < 0) return '';
-    return `<div class="bu">${vals.slice(0, idx + 1).map((v, i) => {
-      const lab = i ? (stepLabel || (typeof v === 'number' && typeof vals[i - 1] === 'number' ? `${v - vals[i - 1] >= 0 ? '+' : ''}${v - vals[i - 1]}` : '')) : '';
-      return `${i ? `<span class="bu-op"><small>${esc(lab)}</small>→</span>` : ''}<span class="bu-v${i === idx ? ' cur' : ''}">${esc(v)}</span>`;
-    }).join('')}</div>`;
-  }
-  const numify = (v) => (/^-?\d+(\.\d+)?$/.test(String(v)) ? Number(v) : v);
-  /* the line and values that gave a variable its current value */
-  function originOf(ctx, name, cur) {
-    const st = ctx.trace.steps;
-    let found = null;
-    for (let i = 0; i < st.length - 1; i++) {
-      const a = st[i].vars || {};
-      const b = st[i + 1].vars || {};
-      if (!(name in b) || typeof b[name] === 'object') continue;
-      if (a[name] !== b[name] && String(b[name]) === String(cur) && (st[i].depth || 0) === (st[i + 1].depth || 0)) { found = { line: st[i].line, before: a }; break; }
-    }
-    if (!found) return null;
-    const src = (ctx.lines[found.line - 1] || '').trim();
-    const m = src.match(/^([A-Za-z_]\w*)\s*(\+|-|\*|\/)?=(?!=)\s*(.+)$/);
-    if (!m || m[1] !== name) return { line: found.line, src };
-    const srcExpr = m[2] ? `${name} ${m[2]} ${m[3]}` : m[3];
-    let expr = srcExpr;
-    expr = expr.replace(/(["'])(?:\\.|(?!\1).)*\1|[A-Za-z_]\w*/g, (w) => (/^["']/.test(w) || !(w in found.before) || typeof found.before[w] === 'object' ? w : found.before[w]));
-    return { line: found.line, src, srcExpr, expr, input: /input\s*\(/.test(m[3]) };
-  }
-
-  function answerFor(ln, ti, ctx) {
-    const line = ctx.lines[ln - 1] || '';
-    const toks = tokensOf(line);
-    const tk = toks[ti];
-    if (!tk) return null;
-    const vars = Object.assign({}, ctx.lastVars(ln) || {}, (ctx.scene && ctx.scene.vars) || {});
-    const text = tk.text.trim();
-    const prevTok = (k) => { for (let j = ti - 1; j >= 0; j--) if (toks[j].kind !== 'ws') { if (!k--) return toks[j]; } return null; };
-    const nextTok = () => { for (let j = ti + 1; j < toks.length; j++) if (toks[j].kind !== 'ws') return toks[j]; return null; };
-    const call = enclosingCall(line, tk.at);
-
-    const loopVarOf = (r) => {
-      const fm = line.match(/^\s*for\s+(\w+)\s+in\s+range/);
-      return fm ? fm[1] : '';
-    };
-    // the word range, or a number inside range(...)
-    if (tk.kind === 'bi' && text === 'range' || (tk.kind === 'num' || tk.kind === 'name') && call && call.name === 'range') {
-      const r = rangeInfo(line, vars);
-      if (r && r.vals) {
-        const lv = loopVarOf(r);
-        const cur = lv ? vars[lv] : null;
-        const last = r.vals[r.vals.length - 1];
-        if (tk.kind === 'bi') {
-          return { q: t('qRangeWhat', r.text.replace(/\s+/g, ' ')), a: t('sRangeWhat', r.one ? 0 : r.start, r.stop, r.step, r.vals.length), vis: rangeDecoder(r, null) + numberLine(r, cur) };
-        }
-        const argIdx = line.slice(call.open + 1, tk.at).split(',').length - 1;
-        const role = r.one ? 'stop' : ['start', 'stop', 'step'][argIdx] || 'stop';
-        if (role === 'start') return { q: t('qStart', text), a: t('sStart', text, lv), vis: rangeDecoder(r, 'start') + numberLine(r, cur) };
-        if (role === 'stop') return { q: t('qStop', text, last), a: r.one ? t('sStopOne', text, last) : t('sStop', text, last), vis: rangeDecoder(r, 'stop') + numberLine(r, cur) };
-        return { q: t('qStep', text), a: t('sStep', text), vis: rangeDecoder(r, 'step') + buildUp(r.vals, null, `+${r.step}`) };
-      }
-    }
-    if (tk.kind === 'name') {
-      const cur = vars[text] != null && typeof vars[text] !== 'object' ? vars[text] : null;
-      // the loop variable
-      const forIdx = ctx.lines.findIndex((l) => new RegExp(`^\\s*for\\s+${text}\\s+in\\b`).test(l));
-      if (forIdx >= 0) {
-        const forLine = ctx.lines[forIdx];
-        const src = ((forLine.match(/\bin\s+(.+):\s*$/) || [])[1] || '').trim();
-        const r = rangeInfo(forLine, vars);
-        const q = cur != null ? t('qLoopNow', text, cur) : t('qLoopVals', text);
-        if (r && r.vals) {
-          const round = r.vals.findIndex((v) => String(v) === String(cur)) + 1;
-          return {
-            q,
-            a: t('sLoopRange', text, r.text.replace(/\s+/g, ' '), r.one ? 0 : r.start, r.stop, r.step),
-            vis: rangeDecoder(r, null) + numberLine(r, cur) + (round > 1 ? buildUp(r.vals, cur, `+${r.step}`) : ''),
-            more: round ? t('mRound', text, round, cur) : '',
-          };
-        }
-        const h = history(ctx.trace, text);
-        return { q, a: t('sLoopList', text, src), vis: seqHtml(h, cur) };
-      }
-      // a parameter of one of our functions
-      const defIdx = ctx.lines.findIndex((l) => new RegExp(`^\\s*def\\s+(\\w+)\\s*\\([^)]*\\b${text}\\b`).test(l));
-      if (defIdx >= 0) {
-        const fn = ctx.lines[defIdx].match(/def\s+(\w+)/)[1];
-        const callTxt = (ctx.lines.filter((l) => !/^\s*def\b/.test(l)).join('\n').match(new RegExp(`\\b${fn}\\s*\\([^()]*\\)`)) || [''])[0].replace(/\s+/g, '');
-        const argv = (callTxt.match(/\(([^()]*)\)/) || [])[1] || '';
-        const val = history(ctx.trace, text)[0];
-        return {
-          q: t('qParam', text),
-          a: t('sParam', text, callTxt, val != null ? val : argv),
-          vis: callTxt ? `<div class="pm"><code>${esc(fn)}(<b>${esc(argv)}</b>)</code><span class="pm-arr">→</span><code>${esc(text)} = <b>${esc(val != null ? val : argv)}</b></code></div>` : '',
-        };
-      }
-      // a function we call
-      if (nextTok() && nextTok().text.startsWith('(') && ctx.lines.some((l) => new RegExp(`^\\s*def\\s+${text}\\b`).test(l))) {
-        return { q: t('qFnCall', text), a: t('aFnCall', text) };
-      }
-      // any other variable: where its current value came from
-      const h = history(ctx.trace, text);
-      const o = cur != null ? originOf(ctx, text, cur) : null;
-      let a = t('aVarPlain', text);
-      if (o && o.input) a = t('sVarInput', text, o.line, cur);
-      else if (o && o.expr != null && String(o.expr).replace(/\s/g, '') !== String(cur)) a = t('sVarCalc', text, o.line, o.srcExpr === o.expr ? o.expr : `${o.srcExpr} = ${o.expr}`, cur);
-      else if (o) a = t('sVarSet', text, o.line, cur);
-      const nums = h.every((v) => typeof numify(v) === 'number');
-      return {
-        q: cur != null ? t('qVarNow', text, cur) : t('qVar', text),
-        a,
-        vis: h.length > 1 ? `<p class="qa-l">${esc(t('mVarHist', text))}</p>${nums ? buildUp(h.map(numify), numify(cur)) : seqHtml(h, cur)}` : '',
-      };
-    }
-    if (tk.kind === 'num') {
-      const p = prevTok(0);
-      const pp = prevTok(1);
-      if (p && CMP.includes(p.text.trim()) && pp) {
-        // the whole left side of the comparison, with the current values put in
-        const opAt = p.at;
-        const start = (line.match(/^\s*(if|elif|while)\s+/) || [''])[0].length;
-        const leftSrc = line.slice(start, opAt).trim();
-        const leftVal = leftSrc.replace(/[A-Za-z_]\w*/g, (w) => (vars[w] != null && typeof vars[w] !== 'object' ? vars[w] : w));
-        let left = leftVal;
-        if (/^[\d\s+\-*%().]+$/.test(leftVal) && !leftVal.includes('//')) {
-          try { const v = Function(`"use strict"; return (${leftVal});`)(); if (Number.isFinite(v)) left = leftVal === String(v) ? leftVal : `${leftVal} = ${v}`; } catch (e) { /* keep text */ }
-        }
-        const num = String(left).includes('=') ? String(left).split('=').pop().trim() : left;
-        const res = cmpEval(num, p.text.trim(), text);
-        return { q: t('qNum', text), a: t('aNumCmp', text, `${leftVal} ${p.text.trim()} ${text}`, res || '…') + (String(left).includes('=') ? ' ' + t('aBecause', left) : '') };
-      }
-      if (p && p.text.trim() === '%') {
-        const a = pp && pp.kind === 'name' && vars[pp.text] != null ? vars[pp.text] : pp && pp.text;
-        return { q: t('qNum', text), a: t('aNumMod', text, a) };
-      }
-      if (call && call.name !== 'range') return { q: t('qNum', text), a: t('aNumArg', text, call.name) };
-      return { q: t('qNum', text), a: t('aNum', text) };
-    }
-    if (tk.kind === 'str') return { q: t('qStr'), a: t('aStr', text) };
-    if (tk.kind === 'com') return { q: t('qCom'), a: t('aCom') };
-    if (tk.kind === 'ws') return { q: t('qIndent'), a: t('aIndent') };
-    if (tk.kind === 'kw' || tk.kind === 'bi' || tk.kind === 'def') {
-      if (tk.kind === 'def') return { q: t('qFnName', text), a: t('aFnName', text) };
-      const g = glossary()[text];
-      return { q: t('qWord', text), a: g || t('aNothingSpecial') };
-    }
-    // operators and punctuation
-    if (text.includes('%')) {
-      const p = prevTok(0);
-      const n = nextTok();
-      const a = p && p.kind === 'name' && vars[p.text] != null ? Number(vars[p.text]) : Number(p && p.text);
-      const b = Number(n && n.text);
-      if (!Number.isNaN(a) && !Number.isNaN(b) && b) {
-        return { q: t('qMod'), a: t('aMod', a, b, Math.floor(a / b), a % b), vis: `<div class="qa-div"><span>${a}</span><span>÷</span><span>${b}</span><span>=</span><span>${Math.floor(a / b)}</span><span class="qa-rest">${esc(t('aRest'))} ${a % b}</span></div>` };
-      }
-      return { q: t('qMod'), a: t('aModPlain') };
-    }
-    const op = CMP.find((c) => text === c);
-    if (op) return { q: t('qOp', op), a: t('aCmp')[op] };
-    if (/^(\+|-|\*|\/|\/\/|\*\*|\+=)$/.test(text)) return { q: t('qOp', text), a: t('aMath')[text] || t('aMath')['+'] };
-    if (text === '=') return { q: t('qOp', '='), a: t('aAssign') };
-    if (text.includes(':') && !text.includes('(')) return { q: t('qColon'), a: t('aColon') };
-    if (/[()]/.test(text)) {
-      const c = text.includes('(') ? enclosingCall(line, tk.at + text.indexOf('(') + 1) : call;
-      return { q: t('qParen'), a: c ? t('aParenFn', c.name) : t('aParen') };
-    }
-    if (/[[\]]/.test(text)) return { q: t('qBracket'), a: t('aBracket') };
-    if (text.includes(',')) return { q: t('qComma'), a: t('aComma') };
-    if (text === '.') return { q: t('qDot'), a: t('aDot') };
-    return { q: t('qWord', text), a: t('aNothingSpecial') };
-  }
-
-  /* the 1–3 questions people usually have about a line */
-  function suggestFor(ln, ctx) {
-    const line = ctx.lines[ln - 1] || '';
-    const toks = tokensOf(line);
-    const picks = [];
-    const add = (ti) => { const a = answerFor(ln, ti, ctx); if (a && !picks.some((p) => p.q === a.q)) picks.push({ ti, q: a.q }); };
-    toks.forEach((tk, i) => {
-      if (picks.length >= 3) return;
-      const text = tk.text.trim();
-      if (tk.kind === 'name' && /^\s*for\s/.test(line) && toks.slice(0, i).filter((x) => x.kind !== 'ws').length === 1) {
-        add(i);
-        // the stop number of range, the one people wonder about most
-        const r = rangeInfo(line, {});
-        if (r && !r.one) {
-          const stopTi = toks.findIndex((x, k) => x.kind === 'num' && x.text === String(r.stop) && k > i);
-          if (stopTi >= 0) add(stopTi);
-        }
-      } else if (tk.kind === 'bi' && text === 'range') add(i);
-      else if (tk.kind === 'op' && text.includes('%')) add(i);
-      else if (tk.kind === 'num' && i > 1 && CMP.includes((toks.slice(0, i).reverse().find((x) => x.kind !== 'ws') || {}).text)) add(i);
+  const shortList = (vals) => (vals.length > 6 ? `${vals.slice(0, 3).join(', ')} … ${vals[vals.length - 1]}` : vals.join(', '));
+  /* put the current values of variables into a piece of code */
+  function withValues(src, vars) {
+    return src.replace(/(["'])(?:\\.|(?!\1).)*\1|[A-Za-z_]\w*(?=\s*\()|[A-Za-z_]\w*/g, (w) => {
+      if (/^["']/.test(w) || !vars || !(w in vars) || valOf(vars[w]) == null) return w;
+      return String(vars[w]);
     });
-    toks.forEach((tk, i) => {
-      if (picks.length >= 3 || tk.kind !== 'name') return;
-      const isTarget = /=(?!=)/.test(line) && line.trim().startsWith(tk.text) && i === toks.findIndex((x) => x.kind !== 'ws');
-      if (!isTarget || /^\s*def\s/.test(line)) add(i);
-    });
-    if (picks.length < 3) {
-      const colon = toks.findIndex((x) => x.kind === 'op' && x.text.includes(':') && !x.text.includes('('));
-      if (colon >= 0) add(colon);
+  }
+
+  /* one sentence per line of code */
+  function explainLine(raw, firstVars) {
+    const tl = raw.trim();
+    if (!tl) return '';
+    if (tl.startsWith('#')) return t('eComment');
+    let m;
+    if ((m = tl.match(/^def\s+(\w+)\s*\(([^)]*)\)/))) return m[2].trim() ? t('eDefP', m[1], m[2].trim()) : t('eDef', m[1]);
+    if ((m = tl.match(/^for\s+(\w+)\s+in\s+(.+):$/))) {
+      const vals = rangeVals(m[2], firstVars);
+      return vals ? t('eForRange', m[1], shortList(vals)) : t('eForList', m[1], m[2].trim());
     }
-    return picks.slice(0, 3);
+    if ((m = tl.match(/^while\s+(.+):$/))) return t('eWhile', m[1]);
+    if ((m = tl.match(/^if\s+(.+):$/))) return t('eIf', m[1]);
+    if ((m = tl.match(/^elif\s+(.+):$/))) return t('eElif', m[1]);
+    if (/^else\s*:$/.test(tl)) return t('eElse');
+    if ((m = tl.match(/^return\s+(.+)$/))) return t('eReturn', m[1]);
+    if ((m = tl.match(/^(\w+)\.append\((.+)\)$/))) return t('eAppend', m[2], m[1]);
+    if ((m = tl.match(/^([A-Za-z_]\w*)\s*\+=\s*(.+)$/))) return t('eAddTo', m[1], m[2]);
+    if ((m = tl.match(/^([A-Za-z_]\w*)\s*=(?!=)\s*(.+)$/))) {
+      const [, name, rhs] = m;
+      if (/int\s*\(\s*input\s*\(/.test(rhs)) return t('eInputInt', name);
+      if (/input\s*\(/.test(rhs)) return t('eInput', name);
+      const upd = rhs.match(new RegExp(`^${name}\\s*([-+*/])\\s*(.+)$`));
+      if (upd) return t({ '+': 'eUpdAdd', '-': 'eUpdSub', '*': 'eUpdMul', '/': 'eUpdDiv' }[upd[1]], name, upd[2]);
+      if (/^(-?\d+(\.\d+)?|(["']).*\3|\[.*\]|True|False|None)$/.test(rhs)) return t('eStore', rhs, name);
+      return t('eCalcStore', rhs, name);
+    }
+    if ((m = tl.match(/^print\s*\((.*)\)$/))) return m[1].trim() ? t('ePrint', m[1]) : t('ePrintEmpty');
+    if ((m = tl.match(/^([A-Za-z_]\w*)\s*\(.*\)$/))) return t('eCall', m[1]);
+    return t('eOther');
+  }
+
+  /* where every piece of output came from.
+     Output between two traced lines belongs to the line that was running. One exception:
+     when a function returns (depth goes down) and its last line was not a print, the output
+     belongs to the line that called it, e.g. print(quadrat(7)). */
+  function outputSources(code, trace) {
+    const lines = code.split('\n');
+    const steps = trace.steps;
+    const depth = (s) => s.depth || 0;
+    const events = [];
+    for (let i = 0; i < steps.length - 1; i++) {
+      const s = steps[i];
+      const next = steps[i + 1];
+      const added = (next.out || '').slice((s.out || '').length);
+      if (!added || s.end) continue;
+      let owner = s;
+      let ret = null;
+      const leaving = next.end ? depth(s) > 0 : depth(next) < depth(s);
+      if (leaving && !/^\s*print\b/.test(lines[s.line - 1] || '')) {
+        for (let k = i - 1; k >= 0; k--) if (depth(steps[k]) === depth(s) - 1) { owner = steps[k]; break; }
+        ret = s.ret != null ? s.ret : null;
+      }
+      events.push({ line: owner.line, text: added.replace(/\n$/, ''), vars: owner.vars, ret });
+    }
+    // the same line printing several times in a row (a loop) becomes one group
+    const groups = [];
+    events.forEach((e) => {
+      const g = groups[groups.length - 1];
+      if (g && g.line === e.line) g.items.push(e); else groups.push({ line: e.line, src: (lines[e.line - 1] || '').trim(), items: [e] });
+    });
+    return groups;
+  }
+
+  function whyForGroup(g, lines) {
+    const src = g.src;
+    const first = g.items[0];
+    const printArgs = (src.match(/^print\s*\((.*)\)$/) || [])[1];
+    const loopLine = lines.findIndex((l, i) => i < g.line - 1 && /^\s*for\s+\w+\s+in\b/.test(l) && (lines[g.line - 1].match(/^ */) || [''])[0].length > (l.match(/^ */) || [''])[0].length);
+    const loopVar = loopLine >= 0 ? (lines[loopLine].match(/^\s*for\s+(\w+)/) || [])[1] : null;
+    if (g.items.length > 1) {
+      const vals = loopVar ? g.items.map((e) => valOf(e.vars[loopVar])).filter((v) => v != null) : [];
+      return { chain: [src], text: vals.length ? t('wLoopPrint', g.items.length, loopVar, shortList(vals)) : t('wRepeated', g.items.length) };
+    }
+    if (/input\s*\(/.test(src)) {
+      const answer = first.text.split('\n').pop();
+      return { chain: [src], text: /input\s*\(\s*\)/.test(src) ? t('wInputNoQ', answer) : t('wInputEcho') };
+    }
+    // a print inside an if / elif / else: say why that branch ran
+    const ind = (l) => (l.match(/^ */) || [''])[0].length;
+    let branch = '';
+    for (let i = g.line - 2; i >= 0; i--) {
+      if (!lines[i].trim() || ind(lines[i]) >= ind(lines[g.line - 1])) continue;
+      const head = lines[i].trim();
+      const c = head.match(/^(?:if|elif)\s+(.+):$/);
+      if (c) {
+        const filled = withValues(c[1], first.vars);
+        branch = ' ' + (filled !== c[1] ? t('wBecauseIfVals', c[1], filled) : t('wBecauseIf', c[1]));
+      } else if (/^else\s*:$/.test(head)) branch = ' ' + t('wBecauseElse');
+      break;
+    }
+    if (printArgs != null) {
+      const chain = [src];
+      const callM = printArgs.match(/([A-Za-z_]\w*)\s*\(([^()]*)\)/);
+      if (first.ret != null && callM && !['len', 'sum', 'max', 'min', 'int', 'str', 'range', 'input', 'round', 'abs'].includes(callM[1])) {
+        chain.push(`print(${printArgs.replace(callM[0], first.ret)})`);
+        return { chain, text: t('wFromFunction', callM[0], first.ret) + branch };
+      }
+      const filled = withValues(printArgs, first.vars);
+      if (filled !== printArgs) chain.push(`print(${filled})`);
+      let text = t('wExpr');
+      if (/^\s*(["']).*\1\s*$/.test(printArgs)) text = t('wText');
+      else if (/^[\d\s+\-*/%().]+$/.test(printArgs)) text = t('wMath');
+      else if (/^\s*[A-Za-z_]\w*\s*$/.test(printArgs)) text = t('wVar', printArgs.trim(), first.text);
+      else if (printArgs.includes(',')) text = t('wComma');
+      return { chain, text: text + branch };
+    }
+    return { chain: [src], text: t('wOther') + branch };
   }
 
   async function openWhy(task, root) {
@@ -1538,219 +1213,47 @@ def _trace_run(code):
     M.anim(root, [{ opacity: 0, transform: 'translateY(-6px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 420, easing: M.SPRING });
     let trace;
     try { trace = await traceRun(code, task.inputs || []); } catch (e) { root.querySelector('.loading').outerHTML = `<p class="rn-err">${esc(t('loadFail'))}</p>`; return; }
-    const scenes = buildScenes(code, trace);
-    /* reopening replaces the old listeners on this box */
-    if (root._why) root._why.abort();
-    root._why = new AbortController();
-    const once = { signal: root._why.signal };
+    const final = trace.steps[trace.steps.length - 1];
+    const out = (final.out || '').replace(/\n$/, '');
+    const firstVars = {};
+    trace.steps.forEach((s) => Object.keys(s.vars || {}).forEach((k) => { if (!(k in firstVars)) firstVars[k] = s.vars[k]; }));
+    const groups = outputSources(code, trace);
+
+    const sol = lines.map((l, i) => {
+      if (!l.trim()) return '';
+      return `<li><span class="w3-n">${i + 1}</span><code class="w3-code">${hl(l)}</code><span class="w3-say">${esc(explainLine(l, firstVars))}</span></li>`;
+    }).join('');
+    const outHtml = out ? out.split('\n').map((l) => `<span class="w3-ol">${esc(l) || ' '}</span>`).join('') : `<span class="muted">${esc(t('testEmpty'))}</span>`;
+    const why = groups.map((g) => {
+      const w = whyForGroup(g, lines);
+      const shown = g.items.map((e) => e.text).join('\n');
+      return `<li class="w3-card">
+          <pre class="w3-out">${esc(shown)}</pre>
+          <div class="w3-from"><span class="w3-tag">${esc(t('wLine', g.line))}</span>${w.chain.map((c, k) => `${k ? '<span class="w3-arr">→</span>' : ''}<code>${hl(c)}</code>`).join('')}</div>
+          <p class="w3-say">${esc(w.text)}</p>
+        </li>`;
+    }).join('');
 
     root.innerHTML = `
-      <div class="why-head"><b>${esc(t('whyTitle'))}</b><span class="why-count"></span><button class="icon-btn why-close" type="button" aria-label="${esc(t('close'))}">${icon('close')}</button></div>
-      <div class="wz">
-        <section class="wz-code"><span class="wz-l">${esc(t('wCode'))}</span>
-          <ol>${lines.map((l, i) => `<li data-ln="${i + 1}"><span class="wz-ptr">▶</span><span class="wz-n">${i + 1}</span><code>${askLineHtml(l, i + 1) || ' '}</code></li>`).join('')}</ol>
-        </section>
-        <section class="wz-calc"><span class="wz-l">${esc(t('wCalcTitle'))}</span><div class="wz-rows"></div></section>
-        <div class="wz-two">
-          <section class="wz-mem"><span class="wz-l">${esc(t('wMem'))}</span><div class="wz-boxes"></div></section>
-          <section class="wz-scr"><span class="wz-l">${esc(t('wScreen'))}</span><pre class="wz-out"></pre></section>
-        </div>
-        <p class="wz-cap" aria-live="polite"></p>
-        <div class="wz-ask">
-          <p class="wz-ask-l">${icon('bulb')}<span>${esc(t('askHint'))}</span></p>
-          <div class="wz-qs"></div>
-          <div class="wz-ans" hidden aria-live="polite"></div>
-        </div>
-      </div>
-      <div class="why-nav">
-        <button class="btn small wz-back" type="button">${icon('left')}${esc(t('wPrev'))}</button>
-        <button class="btn small wz-play" type="button" aria-pressed="false">${icon('play')}<span>${esc(t('wPlay'))}</span></button>
-        <button class="btn primary small wz-next" type="button">${esc(t('whyNext'))}${icon('right')}</button>
-      </div>`;
+      <div class="why-head"><b>${esc(t('whyTitle'))}</b><button class="icon-btn why-close" type="button" aria-label="${esc(t('close'))}">${icon('close')}</button></div>
+      <section class="w3">
+        <h4><span class="w3-num">1</span>${esc(t('w3Solution'))}</h4>
+        <ol class="w3-lines">${sol}</ol>
+      </section>
+      <section class="w3">
+        <h4><span class="w3-num">2</span>${esc(t('w3Output'))}</h4>
+        <pre class="w3-term">${outHtml}</pre>
+      </section>
+      ${groups.length ? `<section class="w3">
+        <h4><span class="w3-num">3</span>${esc(t('w3Why'))}</h4>
+        <ol class="w3-cards">${why}</ol>
+      </section>` : ''}`;
 
-    const $r = (s) => root.querySelector(s);
-    let si = 0;          // scene index
-    let ri = 0;          // rows revealed in the current scene
-    let shownVars = {};
-    let shownOut = '';
-    let timer = null;
-
-    function renderMem(vars, animate) {
-      const box = $r('.wz-boxes');
-      const names = Object.keys(vars);
-      if (!names.length) { box.innerHTML = `<span class="muted wz-empty">${esc(t('wMemEmpty'))}</span>`; shownVars = {}; return; }
-      box.innerHTML = names.map((k) => {
-        const v = vars[k];
-        const fn = v && typeof v === 'object';
-        return `<div class="wz-box${fn ? ' is-fn' : ''}" data-k="${esc(k)}"><span class="wz-k">${esc(k)}</span><span class="wz-v">${fn ? 'ƒ' : esc(v)}</span></div>`;
-      }).join('');
-      if (animate) {
-        names.forEach((k) => {
-          const el = box.querySelector(`[data-k="${CSS.escape(k)}"]`);
-          if (!(k in shownVars)) M.anim(el, [{ opacity: 0, transform: 'scale(.5)' }, { opacity: 1, transform: 'none' }], { duration: 480, easing: M.SPRING });
-          else if (JSON.stringify(shownVars[k]) !== JSON.stringify(vars[k])) {
-            el.classList.add('changed');
-            M.anim(el.querySelector('.wz-v'), [{ opacity: 0, transform: 'translateY(-22px) scale(1.4)' }, { opacity: 1, transform: 'none' }], { duration: 560, easing: M.SPRING });
-          }
-        });
-      }
-      shownVars = vars;
-    }
-    function renderOut(out, animate) {
-      const pre = $r('.wz-out');
-      const text = (out || '').replace(/\n$/, '');
-      if (animate && text.startsWith(shownOut) && text.length > shownOut.length) {
-        const add = text.slice(shownOut.length);
-        pre.innerHTML = `${esc(shownOut)}<span class="wz-new">${esc(add)}</span>`;
-        M.anim($r('.wz-new'), [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0 0 0)' }], { duration: Math.min(900, 200 + add.length * 40) });
-      } else pre.textContent = text;
-      if (!text) pre.innerHTML = `<span class="muted">${esc(t('testEmpty'))}</span>`;
-      shownOut = text;
-    }
-    function setCaption(text) {
-      const cap = $r('.wz-cap');
-      cap.innerHTML = text.split(' ').map((w) => `<span class="nw">${esc(w)}</span>`).join(' ');
-      $$('.nw', cap).forEach((w, i) => M.anim(w, [{ opacity: 0, filter: 'blur(4px)', transform: 'translateY(4px)' }, { opacity: 1, filter: 'blur(0)', transform: 'none' }], { delay: i * 45, duration: 380 }));
-    }
-    function addRow(row, animate) {
-      const wrap = $r('.wz-rows');
-      if (wrap.children.length) wrap.insertAdjacentHTML('beforeend', '<div class="wz-arrow">↓</div>');
-      wrap.insertAdjacentHTML('beforeend', `<div class="wz-row"><span class="wz-rl">${esc(row.label)}</span><code>${row.html}</code></div>`);
-      if (animate) {
-        const arrow = wrap.children.length > 1 ? wrap.children[wrap.children.length - 2] : null;
-        if (arrow) M.anim(arrow, [{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: 300 });
-        const el = wrap.lastElementChild;
-        M.anim(el, [{ opacity: 0, transform: 'translateY(10px) scale(.97)' }, { opacity: 1, transform: 'none' }], { delay: 80, duration: 460, easing: M.SPRING });
-        $$('mark', el).forEach((mk, j) => M.anim(mk, [{ transform: 'scale(1.6)', opacity: 0 }, { transform: 'none', opacity: 1 }], { delay: 260 + j * 90, duration: 520, easing: M.SPRING }));
-      }
-    }
-    /* questions about the code */
-    const ctx = {
-      lines,
-      trace,
-      get scene() { return scenes[si]; },
-      lastVars(ln) { const st = trace.steps.filter((x) => x.line === ln); return st.length ? st[st.length - 1].vars : null; },
-    };
-    function renderAsk(animate) {
-      const sc = scenes[si];
-      const qs = $r('.wz-qs');
-      const picks = sc.line ? suggestFor(sc.line, ctx) : [];
-      qs.innerHTML = picks.map((p) => `<button class="wz-q" type="button" data-ln="${sc.line}" data-ti="${p.ti}">${esc(p.q)}</button>`).join('');
-      if (animate) $$('.wz-q', qs).forEach((b, i) => M.anim(b, [{ opacity: 0, transform: 'translateY(6px) scale(.9)' }, { opacity: 1, transform: 'none' }], { delay: 300 + i * 90, duration: 420, easing: M.SPRING }));
-    }
-    function showAnswer(ln, ti) {
-      const a = answerFor(ln, ti, ctx);
-      if (!a) return;
-      $$('.qt.asked', root).forEach((n) => n.classList.remove('asked'));
-      const tok = root.querySelector(`.qt[data-ln="${ln}"][data-ti="${ti}"]`);
-      if (tok) tok.classList.add('asked');
-      const box = $r('.wz-ans');
-      box.hidden = false;
-      box.innerHTML = `
-        <div class="qa-q"><span class="qa-mark">?</span><b>${esc(a.q)}</b><button class="icon-btn qa-close" type="button" aria-label="${esc(t('close'))}">${icon('close')}</button></div>
-        <p class="qa-a">${esc(a.a)}</p>${a.vis ? `<div class="qa-vis">${a.vis}</div>` : ''}${a.more ? `<p class="qa-more">${esc(a.more)}</p>` : ''}`;
-      M.anim(box, [{ opacity: 0, transform: 'translateY(8px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 420, easing: M.SPRING });
-      M.anim($('.qa-mark', box), [{ transform: 'scale(0) rotate(-40deg)' }, { transform: 'scale(1.2) rotate(8deg)', offset: .6 }, { transform: 'none' }], { duration: 520 });
-      const words = $('.qa-a', box);
-      words.innerHTML = a.a.split(' ').map((w) => `<span class="nw">${esc(w)}</span>`).join(' ');
-      $$('.nw', words).forEach((w, i) => M.anim(w, [{ opacity: 0, filter: 'blur(4px)' }, { opacity: 1, filter: 'blur(0)' }], { delay: 120 + i * 35, duration: 320 }));
-      $$('.rg-s, .nl-d, .bu-v, .bu-op, .qa-v, .qa-div > span, .pm > *', box).forEach((v, i) => M.anim(v, [{ opacity: 0, transform: 'translateY(8px) scale(.7)' }, { opacity: 1, transform: 'none' }], { delay: 260 + i * 45, duration: 420, easing: M.SPRING }));
-      $$('.nl-d.cur, .bu-v.cur, .rg-s.hi', box).forEach((v) => M.anim(v, [{ boxShadow: '0 0 0 0 color-mix(in srgb, var(--kw) 60%, transparent)' }, { boxShadow: '0 0 0 8px transparent' }], { delay: 900, duration: 800, iterations: 2, easing: 'ease-out', fill: 'none' }));
-      const more = $('.qa-more', box);
-      if (more) M.anim(more, [{ opacity: 0 }, { opacity: 1 }], { delay: 700, duration: 400 });
-      box.scrollIntoView({ block: 'nearest', behavior: M.reduced() ? 'auto' : 'smooth' });
-    }
-    root.addEventListener('click', (e) => {
-      const q = e.target.closest('.qt, .wz-q');
-      if (q) { stopPlay(); showAnswer(Number(q.dataset.ln), Number(q.dataset.ti)); return; }
-      if (e.target.closest('.qa-close')) { $r('.wz-ans').hidden = true; $$('.qt.asked', root).forEach((n) => n.classList.remove('asked')); }
-    }, once);
-    root.addEventListener('keydown', (e) => {
-      if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('qt')) { e.preventDefault(); e.target.click(); }
-    }, once);
-
-    function finishScene(animate) {
-      const sc = scenes[si];
-      renderMem(sc.vars, animate);
-      renderOut(sc.out, animate);
-      setCaption(sc.caption);
-      renderAsk(animate);
-      if (sc.result && animate) { M.anim($r('.wz-scr'), [{ boxShadow: '0 0 0 0 transparent' }, { boxShadow: '0 0 0 4px color-mix(in srgb, var(--str) 50%, transparent)' }, { boxShadow: '0 0 0 0 transparent' }], { duration: 1200 }); }
-    }
-    function enterScene(animate) {
-      const sc = scenes[si];
-      ri = 0;
-      $r('.wz-rows').innerHTML = '';
-      $$('.wz-code li', root).forEach((li) => li.classList.toggle('cur', Number(li.dataset.ln) === sc.line));
-      const cur = $r('.wz-code li.cur');
-      if (cur && animate) M.anim(cur, [{ backgroundColor: 'color-mix(in srgb, var(--kw) 40%, transparent)' }, { backgroundColor: 'color-mix(in srgb, var(--kw) 14%, transparent)' }], { duration: 600 });
-      root.classList.toggle('is-result', !!sc.result);
-      $r('.wz-calc').hidden = !sc.rows.length;
-      if (sc.rows.length) { addRow(sc.rows[0], animate); ri = 1; }
-      if (ri >= sc.rows.length) finishScene(animate);
-      else { $r('.wz-cap').textContent = ''; $r('.wz-qs').innerHTML = ''; }
-      updateNav();
-    }
-    function forward() {
-      const sc = scenes[si];
-      if (ri < sc.rows.length) {
-        addRow(sc.rows[ri], true);
-        ri++;
-        if (ri >= sc.rows.length) finishScene(true);
-      } else if (si < scenes.length - 1) {
-        si++;
-        enterScene(true);
-      }
-      updateNav();
-    }
-    function backward() {
-      if (si === 0) return;
-      si--;
-      // show the previous scene complete, without animation
-      const sc = scenes[si];
-      $r('.wz-rows').innerHTML = '';
-      $$('.wz-code li', root).forEach((li) => li.classList.toggle('cur', Number(li.dataset.ln) === sc.line));
-      $r('.wz-calc').hidden = !sc.rows.length;
-      sc.rows.forEach((row) => addRow(row, false));
-      ri = sc.rows.length;
-      root.classList.toggle('is-result', !!sc.result);
-      shownVars = sc.vars;
-      shownOut = (sc.out || '').replace(/\n$/, '');
-      finishScene(false);
-      updateNav();
-    }
-    const atEnd = () => si === scenes.length - 1 && ri >= scenes[si].rows.length;
-    function updateNav() {
-      $r('.why-count').textContent = t('wSceneOf', si + 1, scenes.length);
-      $r('.wz-back').disabled = si === 0;
-      $r('.wz-next').disabled = atEnd();
-      if (atEnd()) stopPlay();
-    }
-    function stopPlay() {
-      clearInterval(timer);
-      timer = null;
-      const b = $r('.wz-play');
-      if (b) { b.setAttribute('aria-pressed', 'false'); b.querySelector('span:last-child').textContent = t('wPlay'); }
-    }
-    $r('.wz-next').addEventListener('click', () => { stopPlay(); forward(); });
-    $r('.wz-back').addEventListener('click', () => { stopPlay(); backward(); });
-    $r('.wz-play').addEventListener('click', (e) => {
-      if (timer) { stopPlay(); return; }
-      e.currentTarget.setAttribute('aria-pressed', 'true');
-      e.currentTarget.querySelector('span:last-child').textContent = t('wPause');
-      forward();
-      timer = setInterval(() => { if (!root.isConnected || root.hidden) { stopPlay(); return; } forward(); }, 1500);
-    });
-    root.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowRight') { e.preventDefault(); stopPlay(); forward(); }
-      if (e.key === 'ArrowLeft') { e.preventDefault(); stopPlay(); backward(); }
-    }, once);
-
-    renderMem({}, false);
-    renderOut('', false);
-    enterScene(true);
-    $$('.wz > *', root).forEach((n, i) => M.anim(n, [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { delay: i * 70, duration: 420 }));
-    $r('.wz-next').focus({ preventScroll: true });
+    // calm entrance: sections, then their rows one after another
+    $$('.w3', root).forEach((s, i) => M.anim(s, [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { delay: i * 260, duration: 460 }));
+    $$('.w3-lines li', root).forEach((li, i) => M.anim(li, [{ opacity: 0, transform: 'translateX(-8px)' }, { opacity: 1, transform: 'none' }], { delay: 120 + i * 90, duration: 380 }));
+    $$('.w3-ol', root).forEach((l, i) => M.anim(l, [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0 0 0)' }], { delay: 520 + i * 120, duration: 420 }));
+    $$('.w3-card', root).forEach((c, i) => M.anim(c, [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { delay: 760 + i * 140, duration: 440 }));
   }
 
   /* opening "Tipp" makes the orange "Why??" pop out */
