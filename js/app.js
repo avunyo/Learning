@@ -1300,6 +1300,58 @@ def _trace_run(code):
     return r ? 'True' : 'False';
   }
 
+  /* range(2, 11, 2) taken apart: three labelled slots */
+  function rangeDecoder(r, hi) {
+    const slot = (role, v, implicit) => `<span class="rg-s${hi === role ? ' hi' : ''}${implicit ? ' implicit' : ''}"><code>${esc(v)}</code><small>${esc(t('l_' + role))}</small></span>`;
+    const parts = r.one
+      ? [slot('start', 0, true), slot('stop', r.stop), slot('step', 1, true)]
+      : [slot('start', r.start), slot('stop', r.stop), slot('step', r.step, r.args.length < 3)];
+    return `<div class="rg"><code class="rg-fn">range(</code>${parts.join('<code class="rg-c">,</code>')}<code class="rg-fn">)</code></div>`;
+  }
+  /* a number line: chosen numbers are dots, the stop is crossed out, the current one says "now" */
+  function numberLine(r, cur) {
+    const lo = Math.min(r.start, r.stop);
+    const hiN = Math.max(r.start, r.stop);
+    const all = hiN - lo <= 16;
+    const nums = all ? Array.from({ length: hiN - lo + 1 }, (_, i) => lo + i) : r.vals.concat([r.stop]);
+    const inSet = new Set(r.vals);
+    return `<div class="nl">${nums.map((v) => {
+      const isCur = String(v) === String(cur);
+      if (v === r.stop) return `<span class="nl-d stop"><b>${v}</b><small>${esc(t('l_notIn'))}</small></span>`;
+      if (inSet.has(v)) return `<span class="nl-d in${isCur ? ' cur' : ''}"><b>${v}</b>${isCur ? `<small>${esc(t('l_now'))}</small>` : ''}</span>`;
+      return `<span class="nl-d off"><b>${v}</b></span>`;
+    }).join('')}</div>`;
+  }
+  /* how we got to the current value: 2 →+2→ 4 →+2→ 6 */
+  function buildUp(vals, upto, stepLabel) {
+    const idx = upto == null ? Math.min(vals.length, 4) - 1 : vals.findIndex((v) => String(v) === String(upto));
+    if (idx < 0) return '';
+    return `<div class="bu">${vals.slice(0, idx + 1).map((v, i) => {
+      const lab = i ? (stepLabel || (typeof v === 'number' && typeof vals[i - 1] === 'number' ? `${v - vals[i - 1] >= 0 ? '+' : ''}${v - vals[i - 1]}` : '')) : '';
+      return `${i ? `<span class="bu-op"><small>${esc(lab)}</small>→</span>` : ''}<span class="bu-v${i === idx ? ' cur' : ''}">${esc(v)}</span>`;
+    }).join('')}</div>`;
+  }
+  const numify = (v) => (/^-?\d+(\.\d+)?$/.test(String(v)) ? Number(v) : v);
+  /* the line and values that gave a variable its current value */
+  function originOf(ctx, name, cur) {
+    const st = ctx.trace.steps;
+    let found = null;
+    for (let i = 0; i < st.length - 1; i++) {
+      const a = st[i].vars || {};
+      const b = st[i + 1].vars || {};
+      if (!(name in b) || typeof b[name] === 'object') continue;
+      if (a[name] !== b[name] && String(b[name]) === String(cur) && (st[i].depth || 0) === (st[i + 1].depth || 0)) { found = { line: st[i].line, before: a }; break; }
+    }
+    if (!found) return null;
+    const src = (ctx.lines[found.line - 1] || '').trim();
+    const m = src.match(/^([A-Za-z_]\w*)\s*(\+|-|\*|\/)?=(?!=)\s*(.+)$/);
+    if (!m || m[1] !== name) return { line: found.line, src };
+    const srcExpr = m[2] ? `${name} ${m[2]} ${m[3]}` : m[3];
+    let expr = srcExpr;
+    expr = expr.replace(/(["'])(?:\\.|(?!\1).)*\1|[A-Za-z_]\w*/g, (w) => (/^["']/.test(w) || !(w in found.before) || typeof found.before[w] === 'object' ? w : found.before[w]));
+    return { line: found.line, src, srcExpr, expr, input: /input\s*\(/.test(m[3]) };
+  }
+
   function answerFor(ln, ti, ctx) {
     const line = ctx.lines[ln - 1] || '';
     const toks = tokensOf(line);
@@ -1311,40 +1363,78 @@ def _trace_run(code):
     const nextTok = () => { for (let j = ti + 1; j < toks.length; j++) if (toks[j].kind !== 'ws') return toks[j]; return null; };
     const call = enclosingCall(line, tk.at);
 
-    // anything inside range(...)
-    if ((tk.kind === 'num' || tk.kind === 'name') && call && call.name === 'range' || tk.kind === 'bi' && text === 'range') {
+    const loopVarOf = (r) => {
+      const fm = line.match(/^\s*for\s+(\w+)\s+in\s+range/);
+      return fm ? fm[1] : '';
+    };
+    // the word range, or a number inside range(...)
+    if (tk.kind === 'bi' && text === 'range' || (tk.kind === 'num' || tk.kind === 'name') && call && call.name === 'range') {
       const r = rangeInfo(line, vars);
       if (r && r.vals) {
-        let a = r.one ? t('aRangeOne', r.stop) : t('aRange', r.start, r.stop, r.stop - (r.step || 1));
-        if (r.step && r.step !== 1) a += ' ' + t('aRangeStep', r.step);
-        return { q: t('qRange', r.text.replace(/\s+/g, ' ')), a, vis: `<p class="qa-l">${esc(t('aRangeVals'))}</p>${seqHtml(r.vals)}` };
+        const lv = loopVarOf(r);
+        const cur = lv ? vars[lv] : null;
+        const last = r.vals[r.vals.length - 1];
+        if (tk.kind === 'bi') {
+          return { q: t('qRangeWhat', r.text.replace(/\s+/g, ' ')), a: t('sRangeWhat', r.one ? 0 : r.start, r.stop, r.step, r.vals.length), vis: rangeDecoder(r, null) + numberLine(r, cur) };
+        }
+        const argIdx = line.slice(call.open + 1, tk.at).split(',').length - 1;
+        const role = r.one ? 'stop' : ['start', 'stop', 'step'][argIdx] || 'stop';
+        if (role === 'start') return { q: t('qStart', text), a: t('sStart', text, lv), vis: rangeDecoder(r, 'start') + numberLine(r, cur) };
+        if (role === 'stop') return { q: t('qStop', text, last), a: r.one ? t('sStopOne', text, last) : t('sStop', text, last), vis: rangeDecoder(r, 'stop') + numberLine(r, cur) };
+        return { q: t('qStep', text), a: t('sStep', text), vis: rangeDecoder(r, 'step') + buildUp(r.vals, null, `+${r.step}`) };
       }
     }
-    // the loop variable (in the for line, or used inside the loop)
     if (tk.kind === 'name') {
-      const forLine = ctx.lines.findIndex((l) => new RegExp(`^\\s*for\\s+${text}\\s+in\\b`).test(l));
-      if (forLine >= 0) {
-        const src = (ctx.lines[forLine].match(/\bin\s+(.+):\s*$/) || [])[1] || '';
+      const cur = vars[text] != null && typeof vars[text] !== 'object' ? vars[text] : null;
+      // the loop variable
+      const forIdx = ctx.lines.findIndex((l) => new RegExp(`^\\s*for\\s+${text}\\s+in\\b`).test(l));
+      if (forIdx >= 0) {
+        const forLine = ctx.lines[forIdx];
+        const src = ((forLine.match(/\bin\s+(.+):\s*$/) || [])[1] || '').trim();
+        const r = rangeInfo(forLine, vars);
+        const q = cur != null ? t('qLoopNow', text, cur) : t('qLoopVals', text);
+        if (r && r.vals) {
+          const round = r.vals.findIndex((v) => String(v) === String(cur)) + 1;
+          return {
+            q,
+            a: t('sLoopRange', text, r.text.replace(/\s+/g, ' '), r.one ? 0 : r.start, r.stop, r.step),
+            vis: rangeDecoder(r, null) + numberLine(r, cur) + (round > 1 ? buildUp(r.vals, cur, `+${r.step}`) : ''),
+            more: round ? t('mRound', text, round, cur) : '',
+          };
+        }
         const h = history(ctx.trace, text);
-        return { q: h.length > 1 ? t('qLoopVar', text, h[0], h[1]) : t('qVar', text), a: `${t('aLoopVar', text, src.trim())}${vars[text] != null ? ' ' + t('aNow', text, vars[text]) : ''}`, vis: `<p class="qa-l">${esc(t('aValues', text))}</p>${seqHtml(h, vars[text])}` };
+        return { q, a: t('sLoopList', text, src), vis: seqHtml(h, cur) };
       }
       // a parameter of one of our functions
       const defIdx = ctx.lines.findIndex((l) => new RegExp(`^\\s*def\\s+(\\w+)\\s*\\([^)]*\\b${text}\\b`).test(l));
       if (defIdx >= 0) {
         const fn = ctx.lines[defIdx].match(/def\s+(\w+)/)[1];
-        const callM = ctx.lines.join('\n').match(new RegExp(`\\b${fn}\\s*\\(([^()]*)\\)`, 'g')) || [];
-        const callTxt = callM.find((c) => !/^def/.test(c)) || '';
-        const h = history(ctx.trace, text);
-        return { q: t('qParam', text), a: t('aParam', text, fn, callTxt.replace(/\s+/g, ''), h[0] != null ? h[0] : '?'), vis: h.length ? seqHtml(h, vars[text]) : '' };
+        const callTxt = (ctx.lines.filter((l) => !/^\s*def\b/.test(l)).join('\n').match(new RegExp(`\\b${fn}\\s*\\([^()]*\\)`)) || [''])[0].replace(/\s+/g, '');
+        const argv = (callTxt.match(/\(([^()]*)\)/) || [])[1] || '';
+        const val = history(ctx.trace, text)[0];
+        return {
+          q: t('qParam', text),
+          a: t('sParam', text, callTxt, val != null ? val : argv),
+          vis: callTxt ? `<div class="pm"><code>${esc(fn)}(<b>${esc(argv)}</b>)</code><span class="pm-arr">→</span><code>${esc(text)} = <b>${esc(val != null ? val : argv)}</b></code></div>` : '',
+        };
       }
       // a function we call
       if (nextTok() && nextTok().text.startsWith('(') && ctx.lines.some((l) => new RegExp(`^\\s*def\\s+${text}\\b`).test(l))) {
         return { q: t('qFnCall', text), a: t('aFnCall', text) };
       }
-      // any other variable
+      // any other variable: where its current value came from
       const h = history(ctx.trace, text);
-      const born = ctx.lines.findIndex((l) => new RegExp(`^\\s*${text}\\s*=(?!=)`).test(l));
-      return { q: t('qVar', text), a: born >= 0 ? t('aVarBorn', text, born + 1, (ctx.lines[born].split('=').slice(1).join('=') || '').trim()) : t('aVarPlain', text), vis: h.length ? `<p class="qa-l">${esc(t('aValues', text))}</p>${seqHtml(h, vars[text])}` : '' };
+      const o = cur != null ? originOf(ctx, text, cur) : null;
+      let a = t('aVarPlain', text);
+      if (o && o.input) a = t('sVarInput', text, o.line, cur);
+      else if (o && o.expr != null && String(o.expr).replace(/\s/g, '') !== String(cur)) a = t('sVarCalc', text, o.line, o.srcExpr === o.expr ? o.expr : `${o.srcExpr} = ${o.expr}`, cur);
+      else if (o) a = t('sVarSet', text, o.line, cur);
+      const nums = h.every((v) => typeof numify(v) === 'number');
+      return {
+        q: cur != null ? t('qVarNow', text, cur) : t('qVar', text),
+        a,
+        vis: h.length > 1 ? `<p class="qa-l">${esc(t('mVarHist', text))}</p>${nums ? buildUp(h.map(numify), numify(cur)) : seqHtml(h, cur)}` : '',
+      };
     }
     if (tk.kind === 'num') {
       const p = prevTok(0);
@@ -1413,8 +1503,15 @@ def _trace_run(code):
     toks.forEach((tk, i) => {
       if (picks.length >= 3) return;
       const text = tk.text.trim();
-      if (tk.kind === 'bi' && text === 'range') add(i);
-      else if (tk.kind === 'name' && /^\s*for\s/.test(line) && toks.slice(0, i).filter((x) => x.kind !== 'ws').length === 1) add(i);
+      if (tk.kind === 'name' && /^\s*for\s/.test(line) && toks.slice(0, i).filter((x) => x.kind !== 'ws').length === 1) {
+        add(i);
+        // the stop number of range, the one people wonder about most
+        const r = rangeInfo(line, {});
+        if (r && !r.one) {
+          const stopTi = toks.findIndex((x, k) => x.kind === 'num' && x.text === String(r.stop) && k > i);
+          if (stopTi >= 0) add(stopTi);
+        }
+      } else if (tk.kind === 'bi' && text === 'range') add(i);
       else if (tk.kind === 'op' && text.includes('%')) add(i);
       else if (tk.kind === 'num' && i > 1 && CMP.includes((toks.slice(0, i).reverse().find((x) => x.kind !== 'ws') || {}).text)) add(i);
     });
@@ -1551,13 +1648,16 @@ def _trace_run(code):
       box.hidden = false;
       box.innerHTML = `
         <div class="qa-q"><span class="qa-mark">?</span><b>${esc(a.q)}</b><button class="icon-btn qa-close" type="button" aria-label="${esc(t('close'))}">${icon('close')}</button></div>
-        <p class="qa-a">${esc(a.a)}</p>${a.vis || ''}`;
+        <p class="qa-a">${esc(a.a)}</p>${a.vis ? `<div class="qa-vis">${a.vis}</div>` : ''}${a.more ? `<p class="qa-more">${esc(a.more)}</p>` : ''}`;
       M.anim(box, [{ opacity: 0, transform: 'translateY(8px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 420, easing: M.SPRING });
       M.anim($('.qa-mark', box), [{ transform: 'scale(0) rotate(-40deg)' }, { transform: 'scale(1.2) rotate(8deg)', offset: .6 }, { transform: 'none' }], { duration: 520 });
       const words = $('.qa-a', box);
       words.innerHTML = a.a.split(' ').map((w) => `<span class="nw">${esc(w)}</span>`).join(' ');
       $$('.nw', words).forEach((w, i) => M.anim(w, [{ opacity: 0, filter: 'blur(4px)' }, { opacity: 1, filter: 'blur(0)' }], { delay: 120 + i * 35, duration: 320 }));
-      $$('.qa-v, .qa-div > span', box).forEach((v, i) => M.anim(v, [{ opacity: 0, transform: 'translateY(8px) scale(.7)' }, { opacity: 1, transform: 'none' }], { delay: 300 + i * 70, duration: 420, easing: M.SPRING }));
+      $$('.rg-s, .nl-d, .bu-v, .bu-op, .qa-v, .qa-div > span, .pm > *', box).forEach((v, i) => M.anim(v, [{ opacity: 0, transform: 'translateY(8px) scale(.7)' }, { opacity: 1, transform: 'none' }], { delay: 260 + i * 45, duration: 420, easing: M.SPRING }));
+      $$('.nl-d.cur, .bu-v.cur, .rg-s.hi', box).forEach((v) => M.anim(v, [{ boxShadow: '0 0 0 0 color-mix(in srgb, var(--kw) 60%, transparent)' }, { boxShadow: '0 0 0 8px transparent' }], { delay: 900, duration: 800, iterations: 2, easing: 'ease-out', fill: 'none' }));
+      const more = $('.qa-more', box);
+      if (more) M.anim(more, [{ opacity: 0 }, { opacity: 1 }], { delay: 700, duration: 400 });
       box.scrollIntoView({ block: 'nearest', behavior: M.reduced() ? 'auto' : 'smooth' });
     }
     root.addEventListener('click', (e) => {
